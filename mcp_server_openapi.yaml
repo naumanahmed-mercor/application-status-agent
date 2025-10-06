@@ -1,0 +1,426 @@
+openapi: 3.1.1
+info:
+  title: Talent Success MCP Server
+  description: |
+    Model Context Protocol (MCP) server for talent success tooling.
+    Provides standardized access to talent success data through JSON-RPC 2.0 protocol.
+    
+    This server exposes 10 tools for accessing talent success data:
+    - get_user_background_status
+    - get_user_applications
+    - get_user_applications_detailed
+    - get_user_jobs
+    - get_user_interviews
+    - get_user_work_trials
+    - get_user_fraud_reports
+    - get_user_details
+    - search_talent_docs
+    - get_talent_docs_stats
+  version: 1.0.0
+  contact:
+    name: Mercor Platform Team
+    email: platform@mercor.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://aws.api.mercor.com
+    description: Production Server
+
+security:
+  - BearerAuth: []
+
+paths:
+  /webhook/talent-success/mcp:
+    post:
+      summary: MCP Server Endpoint
+      description: |
+        Main endpoint for Model Context Protocol (MCP) server.
+        Handles JSON-RPC 2.0 requests for talent success tooling.
+        
+        Supported methods:
+        - tools/list: List available tools
+        - tools/get: Get tool details
+        - tools/call: Execute a tool
+      operationId: mcpServer
+      tags:
+        - MCP Server
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JSONRPCRequest'
+            examples:
+              tools_list:
+                summary: List available tools
+                value:
+                  jsonrpc: "2.0"
+                  id: 1
+                  method: "tools/list"
+              tools_get:
+                summary: Get tool details
+                value:
+                  jsonrpc: "2.0"
+                  id: 2
+                  method: "tools/get"
+                  params:
+                    name: "get_user_background_status"
+              tools_call:
+                summary: Call a tool
+                value:
+                  jsonrpc: "2.0"
+                  id: 3
+                  method: "tools/call"
+                  params:
+                    name: "get_user_background_status"
+                    arguments:
+                      user_email: "user@example.com"
+              tools_call_rag:
+                summary: Call a RAG tool
+                value:
+                  jsonrpc: "2.0"
+                  id: 4
+                  method: "tools/call"
+                  params:
+                    name: "search_talent_docs"
+                    arguments:
+                      query: "background check process"
+                      threshold: 0.3
+                      limit: 5
+      responses:
+        '200':
+          description: Successful JSON-RPC response
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/JSONRPCSuccessResponse'
+                  - $ref: '#/components/schemas/JSONRPCErrorResponse'
+              examples:
+                tools_list_success:
+                  summary: Tools list response
+                  value:
+                    jsonrpc: "2.0"
+                    id: 1
+                    result:
+                      tools:
+                        - name: "get_user_background_status"
+                          description: "Get background check status for a user"
+                          inputSchema:
+                            type: "object"
+                            properties:
+                              user_email:
+                                type: "string"
+                                description: "User's email address"
+                            required: ["user_email"]
+                tools_call_success:
+                  summary: Tool call response
+                  value:
+                    jsonrpc: "2.0"
+                    id: 3
+                    result:
+                      content:
+                        - type: "text"
+                          text: '{"user_email": "user@example.com", "background_status": "Standard Package: Passed", "user_id": "user123"}'
+                tools_call_rag_success:
+                  summary: RAG tool call response
+                  value:
+                    jsonrpc: "2.0"
+                    id: 4
+                    result:
+                      content:
+                        - type: "text"
+                          text: '{"query": "background check process", "threshold": 0.3, "limit": 5, "total_results": 3, "results": [{"chunk_id": "chunk123", "title": "Background Check Process", "text": "The background check process involves...", "similarity": 0.85}]}'
+                error_response:
+                  summary: Error response
+                  value:
+                    jsonrpc: "2.0"
+                    id: 1
+                    error:
+                      code: -32602
+                      message: "Missing required argument: user_email"
+        '400':
+          description: Bad Request - Invalid JSON-RPC request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JSONRPCErrorResponse'
+              example:
+                jsonrpc: "2.0"
+                id: null
+                error:
+                  code: -32700
+                  message: "Parse error"
+        '401':
+          description: Unauthorized - Invalid authentication token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Authentication failed"
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JSONRPCErrorResponse'
+              example:
+                jsonrpc: "2.0"
+                id: 1
+                error:
+                  code: -32603
+                  message: "Internal error: Database connection failed"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Bearer token authentication. Use the same token as other talent success endpoints.
+        Example: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+  schemas:
+    JSONRPCRequest:
+      type: object
+      required:
+        - jsonrpc
+        - id
+        - method
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+          description: JSON-RPC version
+        id:
+          type: [string, number, "null"]
+          description: Request identifier
+        method:
+          type: string
+          enum: ["tools/list", "tools/get", "tools/call"]
+          description: JSON-RPC method
+        params:
+          type: object
+          description: Method parameters
+          properties:
+            name:
+              type: string
+              description: Tool name (for tools/get and tools/call)
+            arguments:
+              type: object
+              description: Tool arguments (for tools/call)
+              properties:
+                user_email:
+                  type: string
+                  format: email
+                  description: User's email address
+                  example: "user@example.com"
+                query:
+                  type: string
+                  description: Search query string (for search_talent_docs)
+                  example: "background check process"
+                threshold:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                  description: Minimum similarity threshold (for search_talent_docs)
+                  example: 0.3
+                limit:
+                  type: integer
+                  minimum: 1
+                  description: Maximum number of results to return (for search_talent_docs)
+                  example: 5
+
+    JSONRPCSuccessResponse:
+      type: object
+      required:
+        - jsonrpc
+        - id
+        - result
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          type: [string, number, "null"]
+        result:
+          type: object
+          properties:
+            tools:
+              type: array
+              items:
+                $ref: '#/components/schemas/MCPTool'
+              description: List of available tools (for tools/list)
+            tool:
+              $ref: '#/components/schemas/MCPTool'
+              description: Tool details (for tools/get)
+            content:
+              type: array
+              items:
+                $ref: '#/components/schemas/MCPContent'
+              description: Tool execution result (for tools/call)
+
+    JSONRPCErrorResponse:
+      type: object
+      required:
+        - jsonrpc
+        - id
+        - error
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          type: [string, number, "null"]
+        error:
+          $ref: '#/components/schemas/JSONRPCError'
+
+    JSONRPCError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: integer
+          description: JSON-RPC error code
+          enum: [-32700, -32600, -32601, -32602, -32603]
+        message:
+          type: string
+          description: Error message
+      examples:
+        - code: -32700
+          message: "Parse error"
+        - code: -32600
+          message: "Invalid Request"
+        - code: -32601
+          message: "Method not found"
+        - code: -32602
+          message: "Invalid params"
+        - code: -32603
+          message: "Internal error"
+
+    MCPTool:
+      type: object
+      required:
+        - name
+        - description
+        - inputSchema
+      properties:
+        name:
+          type: string
+          description: Tool name
+          enum:
+            - "get_user_background_status"
+            - "get_user_applications"
+            - "get_user_applications_detailed"
+            - "get_user_jobs"
+            - "get_user_interviews"
+            - "get_user_work_trials"
+            - "get_user_fraud_reports"
+            - "get_user_details"
+            - "search_talent_docs"
+            - "get_talent_docs_stats"
+        description:
+          type: string
+          description: Tool description
+        inputSchema:
+          type: object
+          properties:
+            user_email:
+              type: string
+              format: email
+              description: User's email address
+            query:
+              type: string
+              description: Search query string (for search_talent_docs)
+            threshold:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: Minimum similarity threshold (for search_talent_docs)
+            limit:
+              type: integer
+              minimum: 1
+              description: Maximum number of results to return (for search_talent_docs)
+          required:
+            - user_email
+
+    MCPContent:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          enum: ["text"]
+        text:
+          type: string
+          description: JSON string containing the tool result
+
+  examples:
+    BackgroundStatusResult:
+      summary: Background status tool result
+      value:
+        user_email: "user@example.com"
+        background_status: "Standard Package: Passed"
+        user_id: "user123"
+
+    ApplicationsResult:
+      summary: Applications tool result
+      value:
+        user_email: "user@example.com"
+        applications:
+          - application_id: "app123"
+            listing_id: "listing456"
+            listing_title: "Senior Software Engineer"
+            status: "APPLIED"
+            applied_at: "2024-01-15T10:30:00Z"
+        total_applications: 1
+
+    FraudStatusResult:
+      summary: Fraud status tool result
+      value:
+        user_email: "user@example.com"
+        fraud_status: "clean"
+        fraud_reports: []
+        last_checked: "2024-01-15T10:30:00Z"
+
+    SearchDocsResult:
+      summary: Search talent docs tool result
+      value:
+        query: "background check process"
+        threshold: 0.3
+        limit: 5
+        total_results: 3
+        results:
+          - chunk_id: "chunk123"
+            doc_id: "doc456"
+            title: "Background Check Process"
+            text: "The background check process involves verifying candidate information..."
+            similarity: 0.85
+            url: "https://docs.mercor.com/background-checks"
+            heading: "Background Check Process"
+            tags: ["background", "verification"]
+            hpath: "talent-success/background-checks"
+
+    DocsStatsResult:
+      summary: Talent docs stats tool result
+      value:
+        database_stats:
+          total_chunks: 1250
+          total_documents: 45
+          last_updated: "2024-01-15T10:30:00Z"
+        system_ready: true
+
+tags:
+  - name: MCP Server
+    description: Model Context Protocol server for talent success tooling

@@ -202,7 +202,8 @@ class IntercomClient:
             author_type = author.get("type", "user")
             
             # Map Intercom author types to our agent roles
-            role = "assistant" if author_type == "admin" else "user"
+            # Both "admin" and "bot" should be mapped to "assistant"
+            role = "assistant" if author_type in ["admin", "bot"] else "user"
             
             messages.append({
                 "role": role,
@@ -223,7 +224,8 @@ class IntercomClient:
                 author_type = author.get("type", "user")
                 
                 # Map Intercom author types to our agent roles
-                role = "assistant" if author_type == "admin" else "user"
+                # Both "admin" and "bot" should be mapped to "assistant"
+                role = "assistant" if author_type in ["admin", "bot"] else "user"
                 
                 messages.append({
                     "role": role,

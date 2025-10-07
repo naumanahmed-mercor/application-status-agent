@@ -15,15 +15,13 @@ def coverage_node(state: State) -> State:
     This node analyzes whether we have sufficient data to answer the user's query
     and decides whether to continue, gather more data, or escalate.
     """
-    # Get current hop data
-    hops_array = state.get("hops", [])
-    current_hop_index = len(hops_array) - 1
-    
-    if current_hop_index < 0:
+    # Get current hop data - access state["hops"] directly to ensure mutations persist
+    if "hops" not in state or not state["hops"]:
         state["error"] = "No current hop data found"
         return state
     
-    current_hop_data = hops_array[current_hop_index]
+    current_hop_index = len(state["hops"]) - 1
+    current_hop_data = state["hops"][current_hop_index]
     hop_number = current_hop_data.get("hop_number", current_hop_index + 1)
     max_hops = state.get("max_hops", 2)
     

@@ -103,8 +103,8 @@ def _determine_escalation_source(state: Dict[str, Any]) -> str:
     hops = state.get("hops", [])
     if hops:
         last_hop = hops[-1]
-        coverage_data = last_hop.get("coverage", {})
-        if coverage_data.get("next_action") == "escalate":
+        coverage_data = last_hop.get("coverage")
+        if coverage_data and coverage_data.get("next_action") == "escalate":
             return "coverage"
 
     # Check if draft node failed

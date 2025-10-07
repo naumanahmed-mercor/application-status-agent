@@ -25,9 +25,11 @@ class Message(TypedDict, total=False):
 
 class State(TypedDict, total=False):
     """State for the LangGraph."""
-    # Input
-    messages: List[Message]  # Array of conversation messages
-    user_email: Optional[str]
+    # Input (Intercom)
+    conversation_id: str  # Intercom conversation ID (primary input)
+    messages: List[Message]  # Array of conversation messages (fetched from Intercom)
+    user_email: Optional[str]  # User email (fetched from Intercom)
+    melvin_admin_id: Optional[str]  # Melvin bot admin ID for Intercom actions
     timestamp: Optional[str]
     
     # MCP Integration
@@ -38,9 +40,16 @@ class State(TypedDict, total=False):
     tool_data: Optional[Dict[str, Any]]  # Individual tool results by tool name
     docs_data: Optional[Dict[str, Any]]  # Individual docs results by query/topic
     
-    # Loop Management
+    # Loop Management (Plan → Gather → Coverage)
     hops: List[HopData]  # Array of hop data
     max_hops: Optional[int]  # Maximum allowed hops (default: 2)
+    
+    # Post-Loop Nodes (Draft, Validate, Escalate, Response)
+    draft: Optional[Dict[str, Any]]  # Draft node data
+    validate: Optional[Dict[str, Any]]  # Validate node data
+    escalate: Optional[Dict[str, Any]]  # Escalate node data
+    response_delivery: Optional[Dict[str, Any]]  # Response node delivery data
+    finalize: Optional[Dict[str, Any]]  # Finalize node data
     
     # Routing
     next_node: Optional[str]  # "plan", "respond", "end", "escalate"
@@ -49,3 +58,6 @@ class State(TypedDict, total=False):
     # Output
     response: str
     error: Optional[str]
+    
+    # Intercom Configuration
+    metadata: Optional[Dict[str, Any]]  # Additional metadata for Intercom

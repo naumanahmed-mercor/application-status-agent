@@ -36,16 +36,6 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
     tool_data = state.get("tool_data", {})
     docs_data = state.get("docs_data", {})
     
-    # Get current hop data
-    hops = state.get("hops", [])
-    current_hop_data = {}
-    if hops:
-        current_hop_data = hops[-1]
-    
-    # Initialize draft data if it doesn't exist
-    if "draft" not in current_hop_data:
-        current_hop_data["draft"] = {}
-    
     start_time = time.time()
     
     try:
@@ -54,8 +44,8 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
         
         generation_time = (time.time() - start_time) * 1000
         
-        # Store draft data in nested structure
-        current_hop_data["draft"] = {
+        # Store draft data at state level (not in hops)
+        state["draft"] = {
             "response": response["text"],
             "generation_time_ms": generation_time,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -63,7 +53,7 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
         
         # Update state with response
         state["response"] = response["text"]
-        state["next_node"] = "end"  # Draft is the final node
+        state["next_node"] = "validate"  # Draft goes to validate node
         
         print(f"✅ Response generated ({generation_time:.1f}ms)")
         print(f"📝 Response: {response['text'][:100]}...")
@@ -72,8 +62,8 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
         error_msg = f"Draft generation failed: {str(e)}"
         print(f"❌ {error_msg}")
         
-        # Store error in draft data
-        current_hop_data["draft"] = {
+        # Store error in draft data at state level
+        state["draft"] = {
             "response": "",
             "generation_time_ms": (time.time() - start_time) * 1000,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),

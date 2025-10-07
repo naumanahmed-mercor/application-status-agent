@@ -2,37 +2,19 @@
 Schemas for the Validate node.
 """
 
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
-
-
-class IntentHit(BaseModel):
-    """Individual intent detection result."""
-    intent_id: str
-    confidence: float
-    evidence: str
-    confirmed: bool
-
-
-class Classification(BaseModel):
-    """Classification results from validation."""
-    hits: List[IntentHit] = Field(default_factory=list)
-
-
-class PolicyValidation(BaseModel):
-    """Policy validation results."""
-    passed: bool
-    violations: List[str] = Field(default_factory=list)
-    blocked_intents: List[str] = Field(default_factory=list)
+from typing import Optional, Dict, Any
+from pydantic import BaseModel
 
 
 class ValidationResponse(BaseModel):
-    """Response from validation endpoint."""
-    response_text: str
-    classification: Classification
-    policy_validation: PolicyValidation
+    """
+    Simplified response from validation endpoint.
+    We only care about overall_passed for routing logic.
+    """
     overall_passed: bool
-    processing_time_ms: float
+    
+    class Config:
+        extra = "allow"  # Allow additional fields, ignore them
 
 
 class ValidateData(BaseModel):

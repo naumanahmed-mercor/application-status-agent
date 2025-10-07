@@ -72,14 +72,10 @@ def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
         
         print(f"✅ Validation response received in {validation_result.get('processing_time_ms', 0):.2f}ms")
         
-        # Parse validation response
-        validation_response = ValidationResponse(**validation_result)
-        
-        # Store validation results
+        # Store raw validation results first
         validate_data["validation_response"] = validation_result
-        validate_data["overall_passed"] = validation_response.overall_passed
         
-        # Add validation results as a note to Intercom conversation
+        # Add raw validation results as a note to Intercom conversation
         conversation_id = state.get("conversation_id")
         admin_id = state.get("melvin_admin_id")
         
@@ -91,8 +87,9 @@ def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 
                 intercom_client = IntercomClient(intercom_api_key)
                 
-                # Format validation note
-                note_text = _format_validation_note(validation_response)
+                # Always use raw JSON format for the note
+                overall_status = "✅ PASSED" if validation_result.get("overall_passed") else "❌ FAILED"
+                note_text = f"🔍 Response Validation Results\n\n**Status**: {overall_status}\n\n```json\n{json.dumps(validation_result, indent=2)}\n```"
                 
                 # Add note to conversation
                 intercom_client.add_note(
@@ -108,6 +105,10 @@ def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 print(f"⚠️  Failed to add validation note to Intercom: {e}")
                 # Continue even if note fails
         
+        # Parse validation response for routing logic (only care about overall_passed)
+        validation_response = ValidationResponse(**validation_result)
+        validate_data["overall_passed"] = validation_response.overall_passed
+        
         # Determine next action based on validation result
         if validation_response.overall_passed:
             validate_data["next_action"] = "response"
@@ -117,22 +118,12 @@ def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
             validate_data["next_action"] = "escalate"
             state["next_node"] = "escalate"
             
-            # Build escalation reason
-            escalation_reason = "Validation failed: "
-            
-            if not validation_response.policy_validation.passed:
-                violations = validation_response.policy_validation.violations
-                blocked_intents = validation_response.policy_validation.blocked_intents
-                escalation_reason += f"Policy violations: {', '.join(violations)}. "
-                if blocked_intents:
-                    escalation_reason += f"Blocked intents: {', '.join(blocked_intents)}. "
-            else:
-                escalation_reason += "Overall validation check failed."
-            
+            # Simple escalation reason
+            escalation_reason = "Validation failed - see validation note for details"
             validate_data["escalation_reason"] = escalation_reason
             state["escalation_reason"] = escalation_reason
             
-            print(f"❌ Validation failed - escalating: {escalation_reason}")
+            print(f"❌ Validation failed - escalating")
 
     except Exception as e:
         print(f"❌ Validation error: {e}")
@@ -147,55 +138,3 @@ def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     print(f"🎯 Validate node completed - next action: {validate_data['next_action']}")
     
     return state
-
-
-def _format_validation_note(validation_response: ValidationResponse) -> str:
-    """
-    Format validation results as a note for Intercom.
-
-    Args:
-        validation_response: Validation response from endpoint
-
-    Returns:
-        Formatted note text
-    """
-    note_lines = [
-        "🔍 Response Validation Results",
-        "",
-        f"**Overall Status**: {'✅ PASSED' if validation_response.overall_passed else '❌ FAILED'}",
-        f"**Processing Time**: {validation_response.processing_time_ms:.2f}ms",
-        ""
-    ]
-    
-    # Add classification results
-    if validation_response.classification.hits:
-        note_lines.append("**Intent Classification**:")
-        for hit in validation_response.classification.hits:
-            status = "✅" if hit.confirmed else "⚠️"
-            note_lines.append(
-                f"- {status} {hit.intent_id} (confidence: {hit.confidence:.2f}) - \"{hit.evidence}\""
-            )
-        note_lines.append("")
-    
-    # Add policy validation results
-    note_lines.append(
-        f"**Policy Validation**: {'✅ PASSED' if validation_response.policy_validation.passed else '❌ FAILED'}"
-    )
-    
-    if validation_response.policy_validation.violations:
-        note_lines.append("**Violations**:")
-        for violation in validation_response.policy_validation.violations:
-            note_lines.append(f"- {violation}")
-        note_lines.append("")
-    
-    if validation_response.policy_validation.blocked_intents:
-        note_lines.append("**Blocked Intents**:")
-        for intent in validation_response.policy_validation.blocked_intents:
-            note_lines.append(f"- {intent}")
-        note_lines.append("")
-    
-    # Add response text
-    note_lines.append("**Response Text**:")
-    note_lines.append(validation_response.response_text)
-    
-    return "\n".join(note_lines)

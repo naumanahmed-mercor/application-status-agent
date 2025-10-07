@@ -108,13 +108,22 @@ def _determine_melvin_status(state: Dict[str, Any]) -> MelvinResponseStatus:
     Returns:
         Appropriate MelvinResponseStatus enum value
     """
+    # Check draft response type first (for ROUTE_TO_TEAM)
+    draft_data = state.get("draft")
+    if draft_data and draft_data.get("response_type") == "ROUTE_TO_TEAM":
+        return MelvinResponseStatus.ROUTE_TO_TEAM
+    
     # Check if we have escalate data (escalation occurred)
     escalate_data = state.get("escalate")
     if escalate_data:
         # Escalation occurred - determine status from escalation source
         escalation_source = escalate_data.get("escalation_source", "unknown")
+        escalation_reason = state.get("escalation_reason", "")
         
-        if escalation_source == "validate":
+        # Check if user requested to talk to a human
+        if "requested to talk to a human" in escalation_reason.lower():
+            return MelvinResponseStatus.ROUTE_TO_TEAM
+        elif escalation_source == "validate":
             return MelvinResponseStatus.VALIDATION_FAILED
         elif escalation_source == "draft":
             return MelvinResponseStatus.RESPONSE_FAILED

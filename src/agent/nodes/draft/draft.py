@@ -46,17 +46,24 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
         
         # Store draft data at state level (not in hops)
         state["draft"] = {
-            "response": response["text"],
+            "response": response["response"],
+            "response_type": response["response_type"],
             "generation_time_ms": generation_time,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ")
         }
         
         # Update state with response
-        state["response"] = response["text"]
-        state["next_node"] = "validate"  # Draft goes to validate node
+        state["response"] = response["response"]
         
-        print(f"✅ Response generated ({generation_time:.1f}ms)")
-        print(f"📝 Response: {response['text'][:100]}...")
+        # Route based on response type
+        if response["response_type"] == "ROUTE_TO_TEAM":
+            state["next_node"] = "escalate"
+            state["escalation_reason"] = "User requested to talk to a human"
+            print(f"🔀 Response type: ROUTE_TO_TEAM - routing to escalate")
+        else:
+            state["next_node"] = "validate"
+            print(f"✅ Response generated ({generation_time:.1f}ms)")
+            print(f"📝 Response: {response['response'][:100]}...")
         
     except Exception as e:
         error_msg = f"Draft generation failed: {str(e)}"
@@ -65,13 +72,15 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
         # Store error in draft data at state level
         state["draft"] = {
             "response": "",
+            "response_type": "REPLY",
             "generation_time_ms": (time.time() - start_time) * 1000,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "error": error_msg
         }
         
         state["error"] = error_msg
-        state["next_node"] = "end"
+        state["next_node"] = "escalate"
+        state["escalation_reason"] = f"Draft generation error: {str(e)}"
     
     return state
 
@@ -279,24 +288,39 @@ def _create_system_prompt(user_query: str, context_data: Dict[str, Any], user_em
 def _parse_response(response_text: str, context_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Parse and structure the LLM response.
-    Returns response in format: {"text": str}
+    LLM returns: {"text": str, "response_type": str}
+    We convert to: {"response": str, "response_type": str}
     
     Args:
         response_text: Raw LLM response
         context_data: Context data used for generation
         
     Returns:
-        Response in format {"text": str}
+        Response in format {"response": str, "response_type": "REPLY" or "ROUTE_TO_TEAM"}
     """
     # Try to parse as JSON first, then fall back to plain text
     try:
         import json
         parsed = json.loads(response_text)
-        if isinstance(parsed, dict) and "text" in parsed:
-            return parsed
+        if isinstance(parsed, dict):
+            # LLM uses "text", we convert to "response"
+            # Also check for "response" for backwards compatibility
+            response = parsed.get("text") or parsed.get("response", response_text)
+            
+            # Default to "REPLY" if response_type not provided (backwards compatibility)
+            response_type = parsed.get("response_type", "REPLY")
+            
+            # Validate response_type
+            if response_type not in ["REPLY", "ROUTE_TO_TEAM"]:
+                response_type = "REPLY"
+            
+            return {
+                "response": response,
+                "response_type": response_type
+            }
         else:
-            # If it's JSON but not in expected format, wrap it
-            return {"text": response_text}
+            # If it's JSON but not a dict, wrap it
+            return {"response": response_text, "response_type": "REPLY"}
     except (json.JSONDecodeError, TypeError):
-        # If it's not JSON, treat as plain text
-        return {"text": response_text}
+        # If it's not JSON, treat as plain text with REPLY type (backwards compatibility)
+        return {"response": response_text, "response_type": "REPLY"}

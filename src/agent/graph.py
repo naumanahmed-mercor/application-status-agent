@@ -138,11 +138,12 @@ def build_graph():
     
     # Add conditional routing from draft
     def route_from_draft(state: State) -> str:
-        """Route from draft node based on success/failure."""
-        if state.get("error") and state.get("next_node") == "end":
-            return "escalate"  # Draft failed, escalate
+        """Route from draft node based on response type or error."""
+        next_node = state.get("next_node")
+        if next_node == "escalate":
+            return "escalate"  # ROUTE_TO_TEAM or error
         else:
-            return "validate"  # Draft succeeded, validate
+            return "validate"  # Normal REPLY, proceed to validation
     
     g.add_conditional_edges(
         "initialize",

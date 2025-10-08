@@ -48,10 +48,18 @@ class IntercomClient:
         Args:
             api_key: Intercom API key for authentication
         """
+        import os
+        
         self.api_key = api_key
+        
+        # Check for dry-run mode from environment variable
+        self.dry_run = os.getenv("DRY_RUN", "false").lower() in ("true", "1", "yes")
         
         if not self.api_key:
             logger.warning("IntercomClient: No API key provided")
+        
+        if self.dry_run:
+            logger.warning("⚠️  IntercomClient: DRY RUN MODE - No write operations will be executed")
 
     def _get_headers(self, api_version: Optional[str] = None) -> Dict[str, str]:
         """Get headers for API requests."""
@@ -164,7 +172,14 @@ class IntercomClient:
 
         Returns:
             Dictionary containing:
-            - messages: List of messages in agent format [{"role": "user|assistant", "content": "..."}]
+            - messages: List of messages in agent format [{"role": "user|assistant", "content": "...", "attachments": [...]}]
+              Each message may optionally include an "attachments" field with a list of attachment objects:
+              - type: Attachment type (e.g., "upload")
+              - name: Filename
+              - url: Signed URL to access the attachment
+              - content_type: MIME type (e.g., "image/png")
+              - filesize: File size in bytes
+              - width/height: Dimensions for images
             - user_email: User's email address (or None if not found)
             - user_name: User's name (or None if not found)
             - subject: Conversation subject/title (or None if empty/not found)
@@ -173,7 +188,19 @@ class IntercomClient:
         Example:
             {
                 "messages": [
-                    {"role": "user", "content": "I want to withdraw my application"},
+                    {
+                        "role": "user", 
+                        "content": "I want to withdraw my application",
+                        "attachments": [
+                            {
+                                "type": "upload",
+                                "name": "screenshot.png",
+                                "url": "https://...",
+                                "content_type": "image/png",
+                                "filesize": 123456
+                            }
+                        ]
+                    },
                     {"role": "assistant", "content": "I can help with that..."}
                 ],
                 "user_email": "user@example.com",
@@ -211,10 +238,19 @@ class IntercomClient:
             # Both "admin" and "bot" should be mapped to "assistant"
             role = "assistant" if author_type in ["admin", "bot"] else "user"
             
-            messages.append({
+            # Extract attachments if present
+            attachments = source.get("attachments", [])
+            
+            message = {
                 "role": role,
                 "content": source.get("body", "")
-            })
+            }
+            
+            # Only add attachments field if there are attachments
+            if attachments:
+                message["attachments"] = attachments
+            
+            messages.append(message)
 
         # Extract conversation parts (subsequent messages)
         conversation_parts = conversation.get("conversation_parts", {}).get("conversation_parts", [])
@@ -234,10 +270,19 @@ class IntercomClient:
                 # Both "admin" and "bot" should be mapped to "assistant"
                 role = "assistant" if author_type in ["admin", "bot"] else "user"
                 
-                messages.append({
+                # Extract attachments if present
+                attachments = part.get("attachments", [])
+                
+                message = {
                     "role": role,
                     "content": body or ""  # Ensure content is never None
-                })
+                }
+                
+                # Only add attachments field if there are attachments
+                if attachments:
+                    message["attachments"] = attachments
+                
+                messages.append(message)
 
         result["messages"] = messages
 
@@ -301,6 +346,13 @@ class IntercomClient:
         Returns:
             Response data from Intercom API or None if request failed
         """
+        if self.dry_run:
+            logger.info(
+                f"[DRY RUN] Would add note to conversation {conversation_id}: "
+                f"{note_body[:100]}{'...' if len(note_body) > 100 else ''}"
+            )
+            return {"type": "conversation", "id": conversation_id, "dry_run": True}
+        
         payload = {
             "message_type": "note",
             "type": "admin",
@@ -340,6 +392,13 @@ class IntercomClient:
                 "admin_123"
             )
         """
+        if self.dry_run:
+            logger.info(
+                f"[DRY RUN] Would send message to conversation {conversation_id}:\n"
+                f"--- MESSAGE START ---\n{message_body}\n--- MESSAGE END ---"
+            )
+            return {"type": "conversation", "id": conversation_id, "dry_run": True}
+        
         payload = {
             "message_type": "comment",
             "type": "admin",
@@ -376,6 +435,15 @@ class IntercomClient:
             snooze_until = int(time.time()) + 3600
             client.snooze_conversation("12345", snooze_until, "admin_123")
         """
+        if self.dry_run:
+            from datetime import datetime
+            snooze_date = datetime.fromtimestamp(snooze_until).strftime('%Y-%m-%d %H:%M:%S')
+            logger.info(
+                f"[DRY RUN] Would snooze conversation {conversation_id} until {snooze_date} "
+                f"(timestamp: {snooze_until})"
+            )
+            return {"type": "conversation", "id": conversation_id, "dry_run": True}
+        
         payload = {
             "message_type": "snoozed",
             "type": "admin",
@@ -445,6 +513,20 @@ class IntercomClient:
             logger.info(f"Adding new custom attribute '{attribute_name}' to conversation {conversation_id}")
         else:
             logger.info(f"Updating existing custom attribute '{attribute_name}' on conversation {conversation_id}")
+
+        # Dry run mode - skip actual update
+        if self.dry_run:
+            logger.info(
+                f"[DRY RUN] Would update custom attribute on conversation {conversation_id}: "
+                f"{attribute_name} = {attribute_value}"
+            )
+            # Return a mock successful response
+            return {
+                "type": "conversation",
+                "id": conversation_id,
+                "custom_attributes": {attribute_name: attribute_value},
+                "dry_run": True
+            }
 
         # Prepare the update payload - only pass the specific attribute we want to update
         payload = {"custom_attributes": {attribute_name: attribute_value}}

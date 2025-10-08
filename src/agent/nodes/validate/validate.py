@@ -12,7 +12,7 @@ import json
 import requests
 from typing import Dict, Any
 from .schemas import ValidationResponse, ValidateData
-from src.clients.intercom import IntercomClient
+from clients.intercom import IntercomClient
 
 
 def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:

@@ -5,7 +5,7 @@ Response node for delivering agent responses via Intercom API.
 import os
 import time
 from typing import Dict, Any
-from clients.intercom import IntercomClient
+from src.clients.intercom import IntercomClient
 from .schemas import ResponseData
 
 

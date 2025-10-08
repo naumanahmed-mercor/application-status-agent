@@ -3,9 +3,10 @@
 import re
 from typing import Dict, Any, List
 from agent.types import State
-from .schemas import CoverageRequest, CoverageResponse, CoverageAnalysis, DataGap
+from .schemas import CoverageData, CoverageResponse, CoverageAnalysis, DataGap
 from agent.llm import planner_llm
-from agent.prompts import get_prompt, PROMPT_NAMES
+from clients.prompts import get_prompt, PROMPT_NAMES
+from utils.prompts import build_conversation_and_user_context
 
 
 def coverage_node(state: State) -> State:
@@ -31,14 +32,6 @@ def coverage_node(state: State) -> State:
     # Note: Hop limit check will be done at the end after coverage analysis
     
     # Extract data from state level (accumulated across all hops)
-    messages = state.get("messages", [])
-    
-    # Get the latest user message as the primary query
-    latest_user_message = ""
-    for message in reversed(messages):
-        if message["role"] == "user":
-            latest_user_message = message["content"]
-            break
     tool_data = state.get("tool_data", {})  # All accumulated tool data
     docs_data = state.get("docs_data", {})  # All accumulated docs data
     
@@ -57,13 +50,24 @@ def coverage_node(state: State) -> State:
     else:
         print("📚 No accumulated docs data available")
     
-    if not latest_user_message:
-        state["error"] = "No user query found in state"
+    try:
+        # Build formatted conversation history and user details (with validation)
+        formatted_context = build_conversation_and_user_context(state)
+    except ValueError as e:
+        state["error"] = str(e)
         return state
     
     try:
-        # Perform coverage analysis
-        coverage_response = _analyze_coverage(latest_user_message, tool_data, docs_data, hop_number, max_hops, messages)
+        
+        # Perform coverage analysis with full conversation history
+        coverage_response = _analyze_coverage(
+            formatted_context["conversation_history"],
+            formatted_context["user_details"],
+            tool_data,
+            docs_data,
+            hop_number,
+            max_hops
+        )
         
         # Update routing state - convert next_action to next_node
         if coverage_response.next_action == "gather_more":
@@ -77,13 +81,14 @@ def coverage_node(state: State) -> State:
         
         state["escalation_reason"] = coverage_response.escalation_reason
         
-        # Store coverage analysis in nested structure
-        current_hop_data["coverage"] = {
+        # Store coverage analysis in nested structure using CoverageData TypedDict
+        coverage_data: CoverageData = {
             "coverage_analysis": coverage_response.analysis.model_dump(),
             "data_sufficient": coverage_response.analysis.data_sufficient,
             "next_node": state["next_node"],  # Use the converted next_node
             "escalation_reason": coverage_response.escalation_reason
         }
+        current_hop_data["coverage"] = coverage_data
         
         # Print analysis results
         print(f"📊 Coverage Score: {coverage_response.analysis.coverage_score:.1%}")
@@ -122,34 +127,22 @@ def coverage_node(state: State) -> State:
     return state
 
 
-def _format_conversation_history(conversation_history: List[Dict[str, Any]]) -> str:
-    """
-    Format conversation history for LLM context.
-    
-    Args:
-        conversation_history: List of conversation messages
-        
-    Returns:
-        Formatted conversation context string
-    """
-    if not conversation_history:
-        return "No conversation history available."
-    
-    formatted_messages = []
-    for i, message in enumerate(conversation_history):
-        role = message.get("role", "unknown")
-        content = message.get("content", "")
-        formatted_messages.append(f"{i+1}. {role.title()}: {content}")
-    
-    return "\n".join(formatted_messages)
 
 
-def _analyze_coverage(user_query: str, tool_data: Dict[str, Any], docs_data: Dict[str, Any], hop_number: int, max_hops: int, conversation_history: List[Dict[str, Any]]) -> CoverageResponse:
+def _analyze_coverage(
+    conversation_history: str,
+    user_details: str,
+    tool_data: Dict[str, Any],
+    docs_data: Dict[str, Any],
+    hop_number: int,
+    max_hops: int
+) -> CoverageResponse:
     """
     Analyze data coverage using LLM.
     
     Args:
-        user_query: User's question
+        conversation_history: Formatted conversation history string
+        user_details: Formatted user details string
         tool_data: Accumulated tool data
         docs_data: Accumulated docs data
         hop_number: Current hop number
@@ -162,16 +155,11 @@ def _analyze_coverage(user_query: str, tool_data: Dict[str, Any], docs_data: Dic
     # Get prompt from LangSmith
     prompt_template = get_prompt(PROMPT_NAMES["COVERAGE_NODE"])
     
-    # Format conversation history for the prompt
-    conversation_context = _format_conversation_history(conversation_history)
-    
     # Format the prompt with variables
     prompt = prompt_template.format(
-        user_query=user_query,
-        conversation_context=conversation_context,
-        available_data=_summarize_accumulated_data_with_content(tool_data, docs_data),
-        hop_number=hop_number,
-        max_hops=max_hops
+        conversation_history=conversation_history,
+        user_details=user_details,
+        available_data=_summarize_accumulated_data_with_content(tool_data, docs_data)
     )
     
     # Get LLM response
@@ -215,7 +203,6 @@ def _analyze_coverage(user_query: str, tool_data: Dict[str, Any], docs_data: Dic
         
         # Create CoverageAnalysis object
         analysis = CoverageAnalysis(
-            user_query=analysis_data.get("user_query", user_query),
             data_sufficient=analysis_data.get("data_sufficient", False),
             coverage_score=analysis_data.get("coverage_score", 0.0),
             available_data=analysis_data.get("available_data", []),
@@ -240,22 +227,6 @@ def _analyze_coverage(user_query: str, tool_data: Dict[str, Any], docs_data: Dic
         raise ValueError(f"Failed to create coverage analysis: {e}")
 
 
-def _summarize_accumulated_data(tool_data: Dict[str, Any]) -> str:
-    """Summarize accumulated tool data for LLM prompt."""
-    if not tool_data:
-        return "No accumulated tool data available."
-    
-    summary = []
-    for tool_name, data in tool_data.items():
-        if isinstance(data, dict):
-            data_keys = list(data.keys())[:3]  # Show first 3 keys
-            summary.append(f"- {tool_name}: {', '.join(data_keys)}")
-        elif isinstance(data, list):
-            summary.append(f"- {tool_name}: List with {len(data)} items")
-        else:
-            summary.append(f"- {tool_name}: {type(data).__name__}")
-    
-    return "\n".join(summary)
 
 
 def _summarize_accumulated_data_with_content(tool_data: Dict[str, Any], docs_data: Dict[str, Any]) -> str:
@@ -313,13 +284,6 @@ def _determine_next_action(analysis: CoverageAnalysis, context: Dict[str, Any]) 
     """Determine the next action based on coverage analysis."""
     if analysis.data_sufficient:
         return "continue"
-    
-    # Check if this is a simple greeting that doesn't need data
-    user_query = analysis.user_query.lower()
-    simple_greetings = ["hi", "hello", "hey", "how are you", "good morning", "good afternoon", "good evening"]
-    
-    if any(greeting in user_query for greeting in simple_greetings):
-        return "continue"  # Simple greetings can proceed without data
     
     # If we don't have sufficient data, try to gather more
     return "gather_more"

@@ -12,7 +12,7 @@ import json
 import requests
 from typing import Dict, Any
 from .schemas import ValidationResponse, ValidateData
-from src.intercom.client import IntercomClient
+from clients.intercom import IntercomClient
 
 
 def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -27,14 +27,14 @@ def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     print("🔍 Validate Node: Validating draft response...")
     
-    # Initialize validate data (stored at state level, not in hops)
-    validate_data = {
-        "validation_response": None,
-        "overall_passed": False,
-        "validation_note_added": False,
-        "escalation_reason": None,
-        "next_action": "escalate"
-    }
+    # Initialize validate data using Pydantic model (stored at state level, not in hops)
+    validate_data = ValidateData(
+        validation_response=None,
+        overall_passed=False,
+        validation_note_added=False,
+        escalation_reason=None,
+        next_action="escalate"
+    )
 
     try:
         # Get the draft response
@@ -73,7 +73,7 @@ def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
         print(f"✅ Validation response received in {validation_result.get('processing_time_ms', 0):.2f}ms")
         
         # Store raw validation results first
-        validate_data["validation_response"] = validation_result
+        validate_data.validation_response = validation_result
         
         # Add raw validation results as a note to Intercom conversation
         conversation_id = state.get("conversation_id")
@@ -98,7 +98,7 @@ def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
                     admin_id=admin_id
                 )
                 
-                validate_data["validation_note_added"] = True
+                validate_data.validation_note_added = True
                 print("✅ Validation results added as note to Intercom conversation")
                 
             except Exception as e:
@@ -107,34 +107,36 @@ def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
         
         # Parse validation response for routing logic (only care about overall_passed)
         validation_response = ValidationResponse(**validation_result)
-        validate_data["overall_passed"] = validation_response.overall_passed
+        validate_data.overall_passed = validation_response.overall_passed
         
         # Determine next action based on validation result
         if validation_response.overall_passed:
-            validate_data["next_action"] = "response"
+            validate_data.next_action = "response"
             state["next_node"] = "response"
             print("✅ Validation passed - routing to response node")
         else:
-            validate_data["next_action"] = "escalate"
+            validate_data.next_action = "escalate"
             state["next_node"] = "escalate"
             
             # Simple escalation reason
             escalation_reason = "Validation failed - see validation note for details"
-            validate_data["escalation_reason"] = escalation_reason
+            validate_data.escalation_reason = escalation_reason
             state["escalation_reason"] = escalation_reason
             
             print(f"❌ Validation failed - escalating")
 
     except Exception as e:
-        print(f"❌ Validation error: {e}")
-        validate_data["escalation_reason"] = f"Validation error: {str(e)}"
-        validate_data["next_action"] = "escalate"
+        error_msg = f"Validation error: {str(e)}"
+        print(f"❌ {error_msg}")
+        validate_data.escalation_reason = error_msg
+        validate_data.next_action = "escalate"
+        state["error"] = error_msg
         state["next_node"] = "escalate"
-        state["escalation_reason"] = f"Validation error: {str(e)}"
+        state["escalation_reason"] = error_msg
 
-    # Store validate data at state level (not in hops)
-    state["validate"] = validate_data
+    # Store validate data at state level (convert to dict for state)
+    state["validate"] = validate_data.model_dump()
     
-    print(f"🎯 Validate node completed - next action: {validate_data['next_action']}")
+    print(f"🎯 Validate node completed - next action: {validate_data.next_action}")
     
     return state

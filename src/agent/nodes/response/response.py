@@ -5,7 +5,8 @@ Response node for delivering agent responses via Intercom API.
 import os
 import time
 from typing import Dict, Any
-from src.intercom import IntercomClient
+from clients.intercom import IntercomClient
+from .schemas import ResponseData
 
 
 def response_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -20,16 +21,15 @@ def response_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     print("📤 Response Node: Delivering response via Intercom...")
     
-    # Initialize response data
-    response_data = {
-        "delivery_attempted": False,
-        "delivery_successful": False,
-        "delivery_error": None,
-        "delivery_time_ms": None,
-        "status_updated": False
-    }
-    
     start_time = time.time()
+    
+    # Initialize response data using Pydantic model
+    response_data = ResponseData(
+        success=False,
+        intercom_delivered=False,
+        error=None,
+        delivery_time_ms=None
+    )
     
     try:
         # Extract response from state
@@ -52,7 +52,6 @@ def response_node(state: Dict[str, Any]) -> Dict[str, Any]:
         
         # Send message to conversation
         print(f"📨 Sending message to conversation {conversation_id}")
-        response_data["delivery_attempted"] = True
         
         result = intercom_client.send_message(
             conversation_id=conversation_id,
@@ -61,23 +60,33 @@ def response_node(state: Dict[str, Any]) -> Dict[str, Any]:
         )
         
         if result:
-            response_data["delivery_successful"] = True
-            response_data["delivery_time_ms"] = (time.time() - start_time) * 1000
-            print(f"✅ Message sent successfully ({response_data['delivery_time_ms']:.1f}ms)")
+            response_data.success = True
+            response_data.intercom_delivered = True
+            response_data.delivery_time_ms = (time.time() - start_time) * 1000
+            print(f"✅ Message sent successfully ({response_data.delivery_time_ms:.1f}ms)")
         else:
             raise ValueError("Failed to send message (no result returned)")
     
     except Exception as e:
         error_msg = f"Failed to deliver response: {str(e)}"
         print(f"❌ {error_msg}")
-        response_data["delivery_successful"] = False
-        response_data["delivery_error"] = error_msg
-        response_data["delivery_time_ms"] = (time.time() - start_time) * 1000
+        response_data.success = False
+        response_data.intercom_delivered = False
+        response_data.error = error_msg
+        response_data.delivery_time_ms = (time.time() - start_time) * 1000
+        
+        # Set escalation fields
+        state["error"] = error_msg
+        state["escalation_reason"] = error_msg
+        state["next_node"] = "escalate"
     
-    # Store response data at state level
-    state["response_delivery"] = response_data
-    state["next_node"] = "finalize"
+    # Store response data at state level (convert to dict for state)
+    state["response_delivery"] = response_data.model_dump()
     
-    print(f"🎯 Response node completed - delivery: {'✅ success' if response_data['delivery_successful'] else '❌ failed'}")
+    # Only set next_node to finalize if not already set to escalate
+    if "next_node" not in state or state["next_node"] != "escalate":
+        state["next_node"] = "finalize"
+    
+    print(f"🎯 Response node completed - delivery: {'✅ success' if response_data.intercom_delivered else '❌ failed'}")
     
     return state

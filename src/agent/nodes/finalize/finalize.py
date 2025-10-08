@@ -10,7 +10,7 @@ import os
 import time
 from typing import Dict, Any
 from .schemas import FinalizeData
-from src.intercom import IntercomClient, MelvinResponseStatus
+from clients.intercom import IntercomClient, MelvinResponseStatus
 
 
 def finalize_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -28,14 +28,14 @@ def finalize_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # Determine Melvin Status based on workflow outcome
     melvin_status = _determine_melvin_status(state)
     
-    # Initialize finalize data
-    finalize_data = {
-        "melvin_status": melvin_status.value,
-        "status_updated": False,
-        "conversation_snoozed": False,
-        "snooze_duration_seconds": 300,  # 5 minutes
-        "error": None
-    }
+    # Initialize finalize data using Pydantic model
+    finalize_data = FinalizeData(
+        melvin_status=melvin_status.value,
+        status_updated=False,
+        conversation_snoozed=False,
+        snooze_duration_seconds=300,  # 5 minutes
+        error=None
+    )
 
     try:
         # Get required data from state
@@ -44,7 +44,7 @@ def finalize_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
         if not conversation_id or not admin_id:
             print("⚠️  Missing conversation_id or melvin_admin_id, skipping finalization")
-            state["finalize"] = finalize_data
+            state["finalize"] = finalize_data.model_dump()
             state["next_node"] = "end"
             return state
 
@@ -63,7 +63,7 @@ def finalize_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 attribute_name="Melvin Status",
                 attribute_value=melvin_status.value
             )
-            finalize_data["status_updated"] = True
+            finalize_data.status_updated = True
             print("✅ Melvin Status updated successfully")
         except Exception as status_error:
             print(f"⚠️  Failed to update Melvin Status: {status_error}")
@@ -71,14 +71,14 @@ def finalize_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
         # Snooze conversation for 5 minutes
         try:
-            snooze_until = int(time.time()) + finalize_data["snooze_duration_seconds"]
+            snooze_until = int(time.time()) + finalize_data.snooze_duration_seconds
             print(f"💤 Snoozing conversation {conversation_id} for 5 minutes")
             intercom_client.snooze_conversation(
                 conversation_id=conversation_id,
                 snooze_until=snooze_until,
                 admin_id=admin_id
             )
-            finalize_data["conversation_snoozed"] = True
+            finalize_data.conversation_snoozed = True
             print("✅ Conversation snoozed successfully")
         except Exception as snooze_error:
             print(f"⚠️  Failed to snooze conversation: {snooze_error}")
@@ -87,13 +87,13 @@ def finalize_node(state: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         error_msg = f"Finalization error: {str(e)}"
         print(f"❌ {error_msg}")
-        finalize_data["error"] = error_msg
+        finalize_data.error = error_msg
 
-    # Store finalize data at state level
-    state["finalize"] = finalize_data
+    # Store finalize data at state level (convert to dict for state)
+    state["finalize"] = finalize_data.model_dump()
     state["next_node"] = "end"
 
-    print(f"🎯 Finalize completed - status: {melvin_status.value}, snoozed: {finalize_data['conversation_snoozed']}")
+    print(f"🎯 Finalize completed - status: {melvin_status.value}, snoozed: {finalize_data.conversation_snoozed}")
 
     return state
 
@@ -137,7 +137,7 @@ def _determine_melvin_status(state: Dict[str, Any]) -> MelvinResponseStatus:
     # Check if response was delivered successfully
     response_delivery = state.get("response_delivery")
     if response_delivery:
-        if response_delivery.get("delivery_successful"):
+        if response_delivery.get("intercom_delivered"):
             return MelvinResponseStatus.SUCCESS
         else:
             return MelvinResponseStatus.MESSAGE_FAILED

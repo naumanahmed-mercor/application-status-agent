@@ -77,7 +77,7 @@ def get_prompt(prompt_name: str) -> str:
 
 # Prompt names used throughout the system (matching LangSmith names)
 PROMPT_NAMES = {
-    "PLAN_NODE": "agent-plan-prompt",
-    "COVERAGE_NODE": "agent-coverage-prompt", 
-    "DRAFT_NODE": "agent-draft-prompt"
+    "PLAN_NODE": "talent-success-agent-plan",
+    "COVERAGE_NODE": "talent-success-agent-coverage", 
+    "DRAFT_NODE": "talent-success-agent-draft"
 }

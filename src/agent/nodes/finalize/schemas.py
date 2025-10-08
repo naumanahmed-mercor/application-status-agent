@@ -3,13 +3,13 @@ Schemas for the Finalize node.
 """
 
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class FinalizeData(BaseModel):
-    """Data structure for finalize node."""
-    melvin_status: str
-    status_updated: bool = False
-    conversation_snoozed: bool = False
-    snooze_duration_seconds: int = 300  # 5 minutes
-    error: Optional[str] = None
+    """Data structure for finalize node (stored at state level)."""
+    melvin_status: str = Field(..., description="Melvin Status value set in Intercom")
+    status_updated: bool = Field(False, description="Whether Melvin Status was updated")
+    conversation_snoozed: bool = Field(False, description="Whether conversation was snoozed")
+    snooze_duration_seconds: int = Field(300, description="Snooze duration in seconds (default: 5 minutes)")
+    error: Optional[str] = Field(None, description="Error message if finalization failed")

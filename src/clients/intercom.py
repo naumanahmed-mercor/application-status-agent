@@ -156,8 +156,8 @@ class IntercomClient:
         """
         Retrieve all necessary conversation data for the agent in a single call.
         
-        This method fetches the conversation once and extracts both the messages
-        and user email, optimizing for performance.
+        This method fetches the conversation once and extracts the messages,
+        user email, user name, and subject, optimizing for performance.
 
         Args:
             conversation_id: The ID of the conversation
@@ -166,6 +166,8 @@ class IntercomClient:
             Dictionary containing:
             - messages: List of messages in agent format [{"role": "user|assistant", "content": "..."}]
             - user_email: User's email address (or None if not found)
+            - user_name: User's name (or None if not found)
+            - subject: Conversation subject/title (or None if empty/not found)
             - conversation_id: The conversation ID (for reference)
             
         Example:
@@ -175,12 +177,16 @@ class IntercomClient:
                     {"role": "assistant", "content": "I can help with that..."}
                 ],
                 "user_email": "user@example.com",
+                "user_name": "John Doe",
+                "subject": "Application Withdrawal Request",
                 "conversation_id": "12345"
             }
         """
         result = {
             "messages": [],
             "user_email": None,
+            "user_name": None,
+            "subject": None,
             "conversation_id": conversation_id
         }
 
@@ -213,12 +219,13 @@ class IntercomClient:
         # Extract conversation parts (subsequent messages)
         conversation_parts = conversation.get("conversation_parts", {}).get("conversation_parts", [])
         for part in conversation_parts:
-            body = part.get("body")
+            body = part.get("body", "")  # Default to empty string if body is None
             part_type = part.get("part_type", "")
             
             # Only include actual messages (comment), skip notes and system events
             # Notes are internal and should not be part of the conversation
-            if body and part_type == "comment":
+            # Include messages even if body is empty (user can send empty messages)
+            if part_type == "comment":
                 # Determine role based on author type
                 author = part.get("author", {})
                 author_type = author.get("type", "user")
@@ -229,33 +236,49 @@ class IntercomClient:
                 
                 messages.append({
                     "role": role,
-                    "content": body
+                    "content": body or ""  # Ensure content is never None
                 })
 
         result["messages"] = messages
 
-        # Extract user email
-        contacts = conversation.get("contacts", {}).get("contacts", [])
-        
-        if contacts:
-            contact_id = contacts[0].get("id")
-            
-            if contact_id:
-                # Fetch the contact details to get the email
-                contact = self._make_request("GET", f"contacts/{contact_id}")
-                
-                if contact:
-                    email = contact.get("email")
-                    if email:
-                        result["user_email"] = email
-                    else:
-                        logger.warning(f"No email found for contact {contact_id} in conversation {conversation_id}")
-                else:
-                    logger.error(f"Failed to retrieve contact {contact_id}")
-            else:
-                logger.error(f"No contact ID found in conversation {conversation_id}")
+        # Extract subject/title from conversation (optional field, often empty)
+        subject = conversation.get("title", "")
+        if subject and subject.strip():
+            result["subject"] = subject.strip()
+            logger.debug(f"Extracted conversation subject: {subject}")
         else:
-            logger.error(f"No contacts found in conversation {conversation_id}")
+            result["subject"] = None
+            logger.debug("No subject found for conversation")
+
+        # Extract user name and email from source->author (more efficient, no extra API call)
+        source = conversation.get("source", {})
+        author = source.get("author", {}) if source else {}
+        author_type = author.get("type", "")
+        
+        # Only extract if author is a user (not admin or bot)
+        if author_type != "user":
+            logger.debug(f"Source author is not a user (type: {author_type}), skipping name/email extraction")
+            result["user_name"] = None
+            result["user_email"] = None
+            return result
+        
+        # Extract name
+        name = author.get("name", "")
+        if name and name.strip():
+            result["user_name"] = name.strip()
+            logger.debug(f"Extracted user name: {name}")
+        else:
+            result["user_name"] = None
+            logger.debug("No name found in source author")
+        
+        # Extract email
+        email = author.get("email", "")
+        if email:
+            result["user_email"] = email
+            logger.debug(f"Extracted user email: {email}")
+        else:
+            result["user_email"] = None
+            logger.warning(f"No email found in source author for conversation {conversation_id}")
 
         return result
 

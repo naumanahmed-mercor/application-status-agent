@@ -1,11 +1,13 @@
-"""Schemas for coverage node."""
+"""
+Schemas for the Coverage node.
+"""
 
-from typing import List, Dict, Any, Optional, TypedDict
-from pydantic import BaseModel, Field, validator
+from typing import Dict, Any, List, Optional, TypedDict
+from pydantic import BaseModel, Field
 
 
 class CoverageData(TypedDict, total=False):
-    """Coverage analysis data for a hop."""
+    """Data structure for coverage node (stored in hop)."""
     coverage_analysis: Optional[Dict[str, Any]]
     data_sufficient: Optional[bool]
     next_node: Optional[str]  # "plan", "respond", "end", "escalate"
@@ -20,7 +22,6 @@ class DataGap(BaseModel):
 
 class CoverageAnalysis(BaseModel):
     """Schema for coverage analysis results."""
-    user_query: str = Field(..., description="Original user query")
     data_sufficient: bool = Field(..., description="Whether we have sufficient data to respond")
     coverage_score: float = Field(..., ge=0.0, le=1.0, description="Coverage score (0-1)")
     available_data: List[str] = Field(..., description="List of data types we have")
@@ -34,7 +35,7 @@ class CoverageAnalysis(BaseModel):
 
 class CoverageRequest(BaseModel):
     """Schema for coverage node input."""
-    user_query: str = Field(..., description="Original user query")
+    conversation_history: List[Dict[str, Any]] = Field(..., description="Full conversation history")
     tool_results: List[Dict[str, Any]] = Field(..., description="Results from executed tools")
     successful_tools: List[str] = Field(..., description="Names of successfully executed tools")
     failed_tools: List[str] = Field(..., description="Names of failed tools")

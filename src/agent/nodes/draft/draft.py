@@ -7,7 +7,9 @@ import time
 import json
 from typing import Dict, Any, List
 from agent.llm import drafter_llm
-from agent.prompts import get_prompt, PROMPT_NAMES
+from clients.prompts import get_prompt, PROMPT_NAMES
+from utils.prompts import build_conversation_and_user_context
+from .schemas import DraftData, ResponseType
 
 
 def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -23,34 +25,40 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
     print("📝 Draft Node: Generating response...")
     
     # Extract data from state
-    # Get conversation context
-    messages = state.get("messages", [])
-    
-    # Get the latest user message as the primary query
-    latest_user_message = ""
-    for message in reversed(messages):
-        if message["role"] == "user":
-            latest_user_message = message["content"]
-            break
-    user_email = state.get("user_email")
     tool_data = state.get("tool_data", {})
     docs_data = state.get("docs_data", {})
     
     start_time = time.time()
     
     try:
+        # Build formatted conversation history and user details (with validation)
+        formatted_context = build_conversation_and_user_context(state)
+    except ValueError as e:
+        state["error"] = str(e)
+        state["next_node"] = "escalate"
+        state["escalation_reason"] = str(e)
+        return state
+    
+    try:
+        
         # Generate response using LLM
-        response = _generate_response(latest_user_message, tool_data, docs_data, user_email, messages)
+        response = _generate_response(
+            formatted_context["conversation_history"],
+            formatted_context["user_details"],
+            tool_data,
+            docs_data
+        )
         
         generation_time = (time.time() - start_time) * 1000
         
-        # Store draft data at state level (not in hops)
-        state["draft"] = {
-            "response": response["response"],
-            "response_type": response["response_type"],
-            "generation_time_ms": generation_time,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ")
-        }
+        # Store draft data at state level using Pydantic model
+        draft_data = DraftData(
+            response=response["response"],
+            response_type=ResponseType(response["response_type"]),
+            generation_time_ms=generation_time,
+            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
+        state["draft"] = draft_data.model_dump()
         
         # Update state with response
         state["response"] = response["response"]
@@ -69,14 +77,14 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
         error_msg = f"Draft generation failed: {str(e)}"
         print(f"❌ {error_msg}")
         
-        # Store error in draft data at state level
-        state["draft"] = {
-            "response": "",
-            "response_type": "REPLY",
-            "generation_time_ms": (time.time() - start_time) * 1000,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "error": error_msg
-        }
+        # Store error in draft data at state level using Pydantic model
+        draft_data = DraftData(
+            response="",
+            response_type=ResponseType.REPLY,
+            generation_time_ms=(time.time() - start_time) * 1000,
+            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
+        state["draft"] = draft_data.model_dump()
         
         state["error"] = error_msg
         state["next_node"] = "escalate"
@@ -85,15 +93,20 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
-def _generate_response(user_query: str, tool_data: Dict[str, Any], docs_data: Dict[str, Any], user_email: str = None, conversation_history: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _generate_response(
+    conversation_history: str,
+    user_details: str,
+    tool_data: Dict[str, Any],
+    docs_data: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     Generate a response using LLM based on accumulated data.
     
     Args:
-        user_query: Original user query
+        conversation_history: Formatted conversation history string
+        user_details: Formatted user details string
         tool_data: Accumulated tool data
         docs_data: Accumulated docs data
-        user_email: User email if available
         
     Returns:
         Generated response with metadata
@@ -103,8 +116,8 @@ def _generate_response(user_query: str, tool_data: Dict[str, Any], docs_data: Di
     # Prepare context data
     context_data = _prepare_context_data(tool_data, docs_data)
     
-    # Create system prompt with conversation context
-    system_prompt = _create_system_prompt(user_query, context_data, user_email, conversation_history)
+    # Create system prompt with conversation context and user details
+    system_prompt = _create_system_prompt(conversation_history, user_details, context_data)
     
     # Generate response
     response = llm.invoke(system_prompt)
@@ -136,93 +149,109 @@ def _prepare_context_data(tool_data: Dict[str, Any], docs_data: Dict[str, Any]) 
     
     # Extract and parse tool data
     for tool_name, results in tool_data.items():
-        if isinstance(results, list) and len(results) > 0:
-            for result in results:
-                if isinstance(result, dict) and "text" in result:
-                    try:
-                        text_content = result["text"]
-                        if isinstance(text_content, str):
-                            # Try to parse as JSON
-                            try:
-                                parsed = json.loads(text_content)
-                                if "applications" in parsed:
-                                    # This is application data - extract key info
-                                    apps = parsed["applications"]
-                                    context["documentation_content"].append({
-                                        "title": f"{tool_name} - {len(apps)} applications found",
-                                        "text": f"Found {len(apps)} applications with the following details:",
-                                        "type": "application_data",
-                                        "applications": apps
-                                    })
-                                else:
-                                    # Other tool data
-                                    context["documentation_content"].append({
-                                        "title": f"{tool_name} data",
-                                        "text": text_content,
-                                        "type": "tool_data"
-                                    })
-                            except json.JSONDecodeError:
-                                # If not JSON, add as raw text
-                                context["documentation_content"].append({
-                                    "title": f"{tool_name} data",
-                                    "text": text_content,
-                                    "type": "raw_text"
-                                })
-                    except Exception:
-                        continue
+        if not isinstance(results, list) or len(results) == 0:
+            continue
+            
+        for result in results:
+            if not isinstance(result, dict) or "text" not in result:
+                continue
+                
+            try:
+                text_content = result["text"]
+                if not isinstance(text_content, str):
+                    continue
+                
+                # Try to parse as JSON
+                try:
+                    parsed = json.loads(text_content)
+                    if "applications" in parsed:
+                        # This is application data - extract key info
+                        apps = parsed["applications"]
+                        context["documentation_content"].append({
+                            "title": f"{tool_name} - {len(apps)} applications found",
+                            "text": f"Found {len(apps)} applications with the following details:",
+                            "type": "application_data",
+                            "applications": apps
+                        })
+                    else:
+                        # Other tool data
+                        context["documentation_content"].append({
+                            "title": f"{tool_name} data",
+                            "text": text_content,
+                            "type": "tool_data"
+                        })
+                except json.JSONDecodeError:
+                    # If not JSON, add as raw text
+                    context["documentation_content"].append({
+                        "title": f"{tool_name} data",
+                        "text": text_content,
+                        "type": "raw_text"
+                    })
+            except Exception:
+                continue
     
     # Extract and parse documentation content
     for query, results in docs_data.items():
-        if isinstance(results, list) and len(results) > 0:
-            for result in results:
-                if isinstance(result, dict) and "text" in result:
-                    try:
-                        text_content = result["text"]
-                        if isinstance(text_content, str):
-                            # Try to parse as JSON
-                            try:
-                                parsed = json.loads(text_content)
-                                if "results" in parsed:
-                                    for doc_result in parsed["results"]:
-                                        if isinstance(doc_result, dict):
-                                            # Extract the actual content
-                                            doc_content = {
-                                                "title": doc_result.get("title", "Unknown"),
-                                                "heading": doc_result.get("heading", ""),
-                                                "text": doc_result.get("text", ""),
-                                                "url": doc_result.get("url", ""),
-                                                "similarity": doc_result.get("similarity", 0.0)
-                                            }
-                                            context["documentation_content"].append(doc_content)
-                                            
-                                            # Also add to sources for reference
-                                            context["sources"].append({
-                                                "title": doc_content["title"],
-                                                "url": doc_content["url"],
-                                                "heading": doc_content["heading"],
-                                                "similarity": doc_content["similarity"]
-                                            })
-                            except json.JSONDecodeError:
-                                # If not JSON, add as raw text
-                                context["documentation_content"].append({
-                                    "title": "Raw Content",
-                                    "text": text_content,
-                                    "type": "raw_text"
-                                })
-                    except Exception:
+        if not isinstance(results, list) or len(results) == 0:
+            continue
+            
+        for result in results:
+            if not isinstance(result, dict) or "text" not in result:
+                continue
+                
+            try:
+                text_content = result["text"]
+                if not isinstance(text_content, str):
+                    continue
+                
+                # Try to parse as JSON
+                try:
+                    parsed = json.loads(text_content)
+                    if "results" not in parsed:
                         continue
+                        
+                    for doc_result in parsed["results"]:
+                        if not isinstance(doc_result, dict):
+                            continue
+                            
+                        # Extract the actual content
+                        doc_content = {
+                            "title": doc_result.get("title", "Unknown"),
+                            "heading": doc_result.get("heading", ""),
+                            "text": doc_result.get("text", ""),
+                            "url": doc_result.get("url", ""),
+                            "similarity": doc_result.get("similarity", 0.0)
+                        }
+                        context["documentation_content"].append(doc_content)
+                        
+                        # Also add to sources for reference
+                        context["sources"].append({
+                            "title": doc_content["title"],
+                            "url": doc_content["url"],
+                            "heading": doc_content["heading"],
+                            "similarity": doc_content["similarity"]
+                        })
+                except json.JSONDecodeError:
+                    # If not JSON, add as raw text
+                    context["documentation_content"].append({
+                        "title": "Raw Content",
+                        "text": text_content,
+                        "type": "raw_text"
+                    })
+            except Exception:
+                continue
     
     return context
 
 
-def _create_system_prompt(user_query: str, context_data: Dict[str, Any], user_email: str = None, conversation_history: List[Dict[str, Any]] = None) -> str:
+def _create_system_prompt(conversation_history: str, user_details: str, context_data: Dict[str, Any]) -> str:
     """
     Create system prompt for response generation.
     
     Args:
-        user_query: Original user query
+        conversation_history: Formatted conversation history string
+        user_details: Formatted user details string
         context_data: Prepared context data
-        user_email: User email if available
         
     Returns:
         System prompt string
@@ -262,25 +291,20 @@ def _create_system_prompt(user_query: str, context_data: Dict[str, Any], user_em
             if doc.get('url'):
                 docs_content += f"   Source: {doc['url']}\n"
     
-    # Format conversation history for context
-    conversation_context = ""
-    if conversation_history:
-        conversation_context = "\n\nCONVERSATION HISTORY:\n"
-        for i, message in enumerate(conversation_history):
-            role = message.get("role", "unknown")
-            content = message.get("content", "")
-            conversation_context += f"{i+1}. {role.title()}: {content}\n"
-    
     # Create the prompt
     # Get prompt from LangSmith
     prompt_template = get_prompt(PROMPT_NAMES["DRAFT_NODE"])
     
     # Format the prompt with variables using direct string replacement
     data_summary_text = ', '.join(data_summary) if data_summary else 'No specific data available'
-    full_data_summary = data_summary_text + docs_content + conversation_context
+    full_data_summary = data_summary_text + docs_content
     
-    # Replace variables directly to avoid issues with JSON examples
-    prompt = prompt_template.replace('{{user_query}}', user_query).replace('{{data_summary}}', full_data_summary)
+    # Format the prompt with variables
+    prompt = prompt_template.format(
+        conversation_history=conversation_history,
+        user_details=user_details,
+        data_summary=full_data_summary
+    )
 
     return prompt
 

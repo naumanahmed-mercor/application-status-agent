@@ -13,7 +13,7 @@ import os
 import time
 from typing import Dict, Any, List
 from .schemas import EscalateData
-from src.intercom import IntercomClient
+from clients.intercom import IntercomClient
 
 
 def escalate_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -28,15 +28,15 @@ def escalate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     print("🚨 Escalate Node: Handling escalation...")
 
-    # Initialize escalate data
-    escalate_data = {
-        "escalation_reason": state.get("escalation_reason", "Unknown escalation reason"),
-        "escalation_source": _determine_escalation_source(state),
-        "note_added": False,
-        "note_content": None,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "context": {}
-    }
+    # Initialize escalate data using Pydantic model
+    escalate_data = EscalateData(
+        escalation_reason=state.get("escalation_reason", "Unknown escalation reason"),
+        escalation_source=_determine_escalation_source(state),
+        note_added=False,
+        note_content=None,
+        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        context={}
+    )
 
     try:
         # Get Intercom configuration
@@ -45,7 +45,7 @@ def escalate_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
         if not conversation_id or not admin_id:
             print("⚠️  Missing conversation_id or melvin_admin_id, skipping Intercom note")
-            state["escalate"] = escalate_data
+            state["escalate"] = escalate_data.model_dump()
             state["next_node"] = "end"
             return state
 
@@ -58,7 +58,7 @@ def escalate_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
         # Build escalation note
         note_content = _build_escalation_note(state, escalate_data)
-        escalate_data["note_content"] = note_content
+        escalate_data.note_content = note_content
 
         # Add note to Intercom conversation
         print(f"📝 Adding escalation note to conversation {conversation_id}")
@@ -68,18 +68,18 @@ def escalate_node(state: Dict[str, Any]) -> Dict[str, Any]:
             admin_id=admin_id
         )
 
-        escalate_data["note_added"] = True
+        escalate_data.note_added = True
         print("✅ Escalation note added successfully")
 
     except Exception as e:
         print(f"❌ Failed to add escalation note: {e}")
-        escalate_data["note_added"] = False
+        escalate_data.note_added = False
 
-    # Store escalate data at state level
-    state["escalate"] = escalate_data
+    # Store escalate data at state level (convert to dict for state)
+    state["escalate"] = escalate_data.model_dump()
     state["next_node"] = "finalize"
 
-    print(f"🎯 Escalation handled - reason: {escalate_data['escalation_reason']}")
+    print(f"🎯 Escalation handled - reason: {escalate_data.escalation_reason}")
 
     return state
 
@@ -119,15 +119,15 @@ def _determine_escalation_source(state: Dict[str, Any]) -> str:
     return "unknown"
 
 
-def _build_escalation_note(state: Dict[str, Any], escalate_data: Dict[str, Any]) -> str:
+def _build_escalation_note(state: Dict[str, Any], escalate_data: EscalateData) -> str:
     """
     Build a simple escalation note with the reason.
 
     Args:
         state: Current state with all context
-        escalate_data: Escalation data
+        escalate_data: Escalation data (Pydantic model)
 
     Returns:
         Formatted note content
     """
-    return f"🚨 Escalation: {escalate_data['escalation_reason']}"
+    return f"🚨 Escalation: {escalate_data.escalation_reason}"

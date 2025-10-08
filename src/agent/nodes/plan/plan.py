@@ -3,33 +3,19 @@
 import re
 from typing import Dict, Any, List
 from agent.types import State
-from .schemas import Plan, PlanRequest, PlanResponse
+from .schemas import PlanData, Plan, PlanRequest
 from agent.llm import planner_llm
-from agent.prompts import get_prompt, PROMPT_NAMES
+from clients.prompts import get_prompt, PROMPT_NAMES
+from utils.prompts import build_conversation_and_user_context
 
 
 def plan_node(state: State) -> State:
     """
-    Plan which tools to execute based on user query.
+    Plan which tools to execute based on conversation history.
     
-    This node analyzes the user's query and creates a plan for which MCP tools
-    to execute to best answer their question.
+    This node analyzes the entire conversation history and creates a plan for which MCP tools
+    to execute to best respond to the conversation.
     """
-    # Extract conversation context and user email from state
-    messages = state.get("messages", [])
-    user_email = state.get("user_email")
-    
-    # Get the latest user message as the primary query
-    latest_user_message = ""
-    for message in reversed(messages):
-        if message["role"] == "user":
-            latest_user_message = message["content"]
-            break
-    
-    if not latest_user_message:
-        state["error"] = "No user message provided"
-        return state
-    
     # Get hops array and current hop number
     hops_array = state.get("hops", [])
     current_hop = len(hops_array)  # Current hop is the next one to be added
@@ -50,13 +36,19 @@ def plan_node(state: State) -> State:
     if docs_data:
         context["available_docs"] = list(docs_data.keys())
     
-    # Add conversation history to context
-    context["conversation_history"] = messages
+    try:
+        # Build formatted conversation history and user details (with validation)
+        formatted_context = build_conversation_and_user_context(state)
+        context["conversation_history_formatted"] = formatted_context["conversation_history"]
+        context["user_details_formatted"] = formatted_context["user_details"]
+    except ValueError as e:
+        state["error"] = str(e)
+        return state
     
     plan_request = PlanRequest(
-        user_query=latest_user_message,  # Keep latest message as primary query
-        user_email=user_email,
-        context=context  # Full conversation history is now in context["conversation_history"]
+        conversation_history=state.get("messages", []),
+        user_email=None,  # No longer used, kept for schema compatibility
+        context=context
     )
     
     try:
@@ -66,19 +58,23 @@ def plan_node(state: State) -> State:
         # Generate plan using LLM
         plan = _generate_plan(plan_request, available_tools)
         
-        # Store plan in nested structure
-        hop_data["plan"] = {
+        # Store plan in nested structure using PlanData TypedDict
+        plan_data: PlanData = {
             "plan": plan.model_dump(),
             "tool_calls": plan.tool_calls,
             "reasoning": plan.reasoning,
         }
+        hop_data["plan"] = plan_data
         
         print(f"📋 Plan generated (Hop {current_hop + 1}): {len(plan.tool_calls)} tools to execute")
         for i, tool_call in enumerate(plan.tool_calls, 1):
             print(f"   {i}. {tool_call.get('tool_name', 'Unknown')} - {tool_call.get('reasoning', 'N/A')}")
         
     except Exception as e:
-        state["error"] = f"Plan generation failed: {str(e)}"
+        error_msg = f"Plan generation failed: {str(e)}"
+        state["error"] = error_msg
+        state["escalation_reason"] = error_msg
+        state["next_node"] = "escalate"
         print(f"❌ Plan generation error: {e}")
         return state
     
@@ -93,7 +89,7 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
     Generate an execution plan using LLM.
     
     Args:
-        request: Plan request with user query and context
+        request: Plan request with conversation history and context
         available_tools: List of available tools from MCP server
         
     Returns:
@@ -103,18 +99,19 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
     # Create context-aware prompt for LLM
     context_info = _format_context_for_prompt(request.context)
     
-    # Format conversation history for the prompt
-    conversation_context = _format_conversation_history(request.context.get("conversation_history", []))
+    # Build conversation history and user details (structured format)
+    # Get from context if available (passed from plan_node call)
+    conversation_history = request.context.get("conversation_history_formatted", "")
+    user_details = request.context.get("user_details_formatted", "")
     
     # Get prompt from LangSmith
     prompt_template = get_prompt(PROMPT_NAMES["PLAN_NODE"])
     
     # Format the prompt with variables
     prompt = prompt_template.format(
-        user_query=request.user_query,
-        user_email=request.user_email or "Not provided",
+        conversation_history=conversation_history,
+        user_details=user_details,
         context_info=context_info,
-        conversation_context=conversation_context,
         available_tools=_format_tools_for_prompt(available_tools)
     )
     
@@ -132,8 +129,6 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
         
         # Create Plan object
         plan = Plan(
-            user_query=plan_data.get("user_query", request.user_query),
-            user_email=plan_data.get("user_email"),
             reasoning=plan_data.get("reasoning", "Generated plan"),
             tool_calls=tool_calls
         )
@@ -203,26 +198,6 @@ def _build_context_from_hops(hops_array: List[Dict[str, Any]], state: State) -> 
     return context
 
 
-def _format_conversation_history(conversation_history: List[Dict[str, Any]]) -> str:
-    """
-    Format conversation history for LLM context.
-    
-    Args:
-        conversation_history: List of conversation messages
-        
-    Returns:
-        Formatted conversation context string
-    """
-    if not conversation_history:
-        return "No conversation history available."
-    
-    formatted_messages = []
-    for i, message in enumerate(conversation_history):
-        role = message.get("role", "unknown")
-        content = message.get("content", "")
-        formatted_messages.append(f"{i+1}. {role.title()}: {content}")
-    
-    return "\n".join(formatted_messages)
 
 
 def _format_context_for_prompt(context: Dict[str, Any]) -> str:

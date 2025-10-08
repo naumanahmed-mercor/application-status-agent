@@ -23,12 +23,25 @@ class Message(TypedDict, total=False):
     content: str
 
 
+class UserDetails(TypedDict, total=False):
+    """User details for personalization."""
+    name: Optional[str]  # User's name (fetched from Intercom)
+    email: Optional[str]  # User's email (fetched from Intercom)
+
+
+class ConversationHistory(TypedDict, total=False):
+    """Conversation history with metadata."""
+    messages: List[Message]  # Array of conversation messages
+    subject: Optional[str]  # Conversation subject/title (often empty)
+
+
 class State(TypedDict, total=False):
     """State for the LangGraph."""
     # Input (Intercom)
     conversation_id: str  # Intercom conversation ID (primary input)
     messages: List[Message]  # Array of conversation messages (fetched from Intercom)
-    user_email: Optional[str]  # User email (fetched from Intercom)
+    user_details: UserDetails  # User details (name and email from Intercom)
+    subject: Optional[str]  # Conversation subject/title (fetched from Intercom, often empty)
     melvin_admin_id: Optional[str]  # Melvin bot admin ID for Intercom actions
     timestamp: Optional[str]
     

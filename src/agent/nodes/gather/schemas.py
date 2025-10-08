@@ -1,11 +1,13 @@
-"""Schemas for gather node."""
+"""
+Schemas for the Gather node.
+"""
 
-from typing import List, Dict, Any, Optional, TypedDict
+from typing import Dict, Any, List, Optional, TypedDict
 from pydantic import BaseModel, Field, validator
 
 
 class GatherData(TypedDict, total=False):
-    """Execution data for a hop."""
+    """Data structure for gather node (stored in hop)."""
     tool_results: Optional[List[Dict[str, Any]]]
     total_execution_time_ms: Optional[float]
     success_rate: Optional[float]
@@ -100,12 +102,3 @@ class GatherRequest(BaseModel):
     tool_calls: List[ToolCall] = Field(..., description="List of tools to execute")
     user_email: Optional[str] = Field(None, description="User email for user data tools")
     context: Optional[Dict[str, Any]] = Field(None, description="Additional context")
-
-
-class GatherResponse(BaseModel):
-    """Schema for gather node output."""
-    results: List[ToolResult] = Field(..., description="Results from all tool executions")
-    successful_tools: List[str] = Field(..., description="Names of successfully executed tools")
-    failed_tools: List[str] = Field(..., description="Names of tools that failed")
-    total_execution_time_ms: float = Field(..., description="Total time for all tool executions")
-    success_rate: float = Field(..., ge=0.0, le=1.0, description="Success rate of tool executions")

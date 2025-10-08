@@ -3,7 +3,7 @@
 import time
 from typing import Dict, Any, List
 from agent.types import State
-from .schemas import ToolCall, ToolResult, GatherRequest, GatherResponse
+from .schemas import GatherData, ToolCall, ToolResult, GatherRequest
 from src.mcp.factory import create_mcp_client
 
 
@@ -31,13 +31,14 @@ def gather_node(state: State) -> State:
         # No tools needed - this is normal for simple queries like "Hi"
         print("ℹ️  No tools needed for this query")
         
-        # Store empty gather results
-        current_hop_data["gather"] = {
+        # Store empty gather results using GatherData TypedDict
+        gather_data: GatherData = {
             "tool_results": [],
             "total_execution_time_ms": 0.0,
             "success_rate": 1.0,  # 100% success since no tools failed
             "execution_status": "completed"
         }
+        current_hop_data["gather"] = gather_data
         
         print("✅ No tool execution needed - proceeding to coverage analysis")
         return state
@@ -100,13 +101,14 @@ def gather_node(state: State) -> State:
         total_execution_time = (time.time() - total_start_time) * 1000
         success_rate = len(successful_tools) / len(tool_calls_data) if tool_calls_data else 0
         
-        # Store results in nested gather structure
-        current_hop_data["gather"] = {
+        # Store results in nested gather structure using GatherData TypedDict
+        gather_data: GatherData = {
             "tool_results": [result.model_dump() for result in results],
             "total_execution_time_ms": total_execution_time,
             "success_rate": success_rate,
             "execution_status": "completed"
         }
+        current_hop_data["gather"] = gather_data
         
         # Store individual tool results at state level (independent of hops)
         # Initialize data storage if it doesn't exist
@@ -152,7 +154,10 @@ def gather_node(state: State) -> State:
         print(f"   📊 Success rate: {success_rate:.1%}")
         
     except Exception as e:
-        state["error"] = f"Gather node error: {str(e)}"
+        error_msg = f"Gather node error: {str(e)}"
+        state["error"] = error_msg
+        state["escalation_reason"] = error_msg
+        state["next_node"] = "escalate"
         print(f"❌ Gather node error: {e}")
     
     return state

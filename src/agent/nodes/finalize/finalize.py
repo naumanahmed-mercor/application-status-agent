@@ -10,7 +10,7 @@ import os
 import time
 from typing import Dict, Any
 from .schemas import FinalizeData
-from clients.intercom import IntercomClient, MelvinResponseStatus
+from src.clients.intercom import IntercomClient, MelvinResponseStatus
 
 
 def finalize_node(state: Dict[str, Any]) -> Dict[str, Any]:

@@ -6,8 +6,8 @@ import os
 import time
 from typing import Dict, Any
 from agent.types import State
-from clients.intercom import IntercomClient
-from mcp.factory import create_mcp_client
+from src.clients.intercom import IntercomClient
+from src.mcp.factory import create_mcp_client
 from .schemas import InitializeData
 
 

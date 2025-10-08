@@ -13,7 +13,7 @@ import os
 import time
 from typing import Dict, Any, List
 from .schemas import EscalateData
-from src.clients.intercom import IntercomClient
+from clients.intercom import IntercomClient
 
 
 def escalate_node(state: Dict[str, Any]) -> Dict[str, Any]:

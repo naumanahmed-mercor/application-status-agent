@@ -5,8 +5,8 @@ from typing import Dict, Any, List
 from agent.types import State
 from .schemas import PlanData, Plan, PlanRequest
 from agent.llm import planner_llm
-from clients.prompts import get_prompt, PROMPT_NAMES
-from utils.prompts import build_conversation_and_user_context
+from src.clients.prompts import get_prompt, PROMPT_NAMES
+from src.utils.prompts import build_conversation_and_user_context
 
 
 def plan_node(state: State) -> State:

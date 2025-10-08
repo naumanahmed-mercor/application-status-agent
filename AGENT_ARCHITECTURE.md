@@ -4,15 +4,9 @@
 
 The Application Status Agent is a conversational AI system designed to help users with queries about their job applications, payments, and other talent-related questions. It uses an agentic workflow to gather information, analyze coverage, and provide accurate responses.
 
-## High-Level Flow
-
-```
-Intercom Conversation → Initialize → [Plan → Gather → Coverage] Loop → Draft → Validate → Response → Finalize
-                                          ↓                                      ↓          ↓
-                                      Escalate ←────────────────────────────────┘          │
-                                          │                                                 │
-                                          └─────────────────────────────────────────────────┘
-```
+**Documentation:**
+- [Flowchart (Figma)](https://www.figma.com/board/SEocRxtpVvBeT3yZiDIIm2/V3-Agents-Architecture?node-id=0-1&t=bmp4YyCtNJEjajYz-1)
+- [State Structure Documentation](STATE_STRUCTURE.md)
 
 ## Data Sources
 
@@ -85,7 +79,7 @@ The agent connects to two primary data sources:
 - `Coverage` - Always proceeds to analyze data sufficiency
 
 **Key Features**:
-- Handles queries that don't require tools (e.g., "Hi")
+- Executes gracefully even when no tools are planned (e.g., simple greetings)
 - Stores tool data and docs data separately
 - Accumulates results across hops for comprehensive context
 
@@ -144,9 +138,9 @@ If data_sufficient = false AND hop >= max_hops → Escalate
 ```
 
 **Key Features**:
-- LLM returns `text` field, converted to `response` internally
+- Holds the persona and tone of the bot
+- Responsible for formatting, structure, and presentation of responses
 - Defaults to `REPLY` for backwards compatibility
-- Direct, factual responses (not overly helpful)
 
 ---
 
@@ -155,7 +149,7 @@ If data_sufficient = false AND hop >= max_hops → Escalate
 **Purpose**: Validate the draft response against policy and intent classification.
 
 **Responsibilities**:
-- Send response to external validation endpoint
+- Send response to external validation endpoint (currently using Coil deployment, may be migrated to mercor-api)
 - Add validation results as Intercom note (raw JSON)
 - Route based on validation result
 - Handle validation errors gracefully
@@ -166,7 +160,7 @@ If data_sufficient = false AND hop >= max_hops → Escalate
 - `Response` - If `overall_passed = true`
 - `Escalate` - If `overall_passed = false` or validation error
 
-**Validation Note**: Always adds raw JSON validation response as note, even if parsing fails
+**Validation Note**: Adds validation response as an Intercom note for team visibility
 
 ---
 
@@ -212,8 +206,8 @@ If data_sufficient = false AND hop >= max_hops → Escalate
 **Purpose**: Cleanup and final actions before ending the workflow.
 
 **Responsibilities**:
-- Determine and update Melvin Status custom attribute
-- Snooze conversation for 5 minutes
+- Determine and update `Melvin Status` custom attribute
+- Snooze conversation for 5 minutes (this is necessary to handoff the conversation to an intercom workflow for further processing)
 - Store finalization data in state
 
 **Triggers**: After Escalate or Response nodes
@@ -225,12 +219,12 @@ If data_sufficient = false AND hop >= max_hops → Escalate
 | Scenario | Status |
 |----------|--------|
 | Response delivered successfully | `success` |
-| User requested human | `ROUTE_TO_TEAM` |
-| Validation failed | `VALIDATION_FAILED` |
-| Draft generation error | `RESPONSE_FAILED` |
-| Hops exhausted | `ROUTE_TO_TEAM` |
+| User requested human | `route_to_team` |
+| Validation failed | `validation_failed` |
+| Draft generation error | `response_failed` |
+| Hops exhausted | `route_to_team` (will be updated to a more meaningful status) |
 | Initialization failed | `error` |
-| Message delivery failed | `MESSAGE_FAILED` |
+| Message delivery failed | `message_failed` |
 
 ---
 
@@ -277,32 +271,25 @@ The agent can escalate in 7 different scenarios:
 
 ## State Management
 
-The agent uses a structured state to track data across nodes:
+The agent uses a structured state to track data across nodes. For detailed state structure documentation, see [STATE_STRUCTURE.md](STATE_STRUCTURE.md).
 
-### Key State Fields:
+### Key Concepts:
 
-- **`conversation_id`**: Intercom conversation ID (primary input)
-- **`messages`**: Array of conversation messages (fetched from Intercom)
-- **`user_email`**: User's email address
-- **`melvin_admin_id`**: Melvin bot admin ID for Intercom actions
+**Input**: 
+- Primary input is `conversation_id` from Intercom
+- Messages and user email are fetched during initialization
 
-### Data Storage:
+**Data Storage**:
+- `tool_data`: Accumulated tool results across hops
+- `docs_data`: Accumulated documentation results across hops
 
-- **`tool_data`**: Individual tool results by tool name (accumulated across hops)
-- **`docs_data`**: Individual docs results by query (accumulated across hops)
+**Loop Management**:
+- `hops`: Array tracking each Plan → Gather → Coverage iteration
+- `max_hops`: Maximum allowed loops (default: 2)
 
-### Loop Management:
-
-- **`hops`**: Array of hop data (each hop contains plan, gather, coverage)
-- **`max_hops`**: Maximum allowed hops (default: 2)
-
-### Post-Loop Nodes:
-
-- **`draft`**: Draft node data (response, response_type, timing)
-- **`validate`**: Validate node data (validation results, note status)
-- **`escalate`**: Escalate node data (source, reason, note status)
-- **`response_delivery`**: Response node data (delivery status, timing)
-- **`finalize`**: Finalize node data (Melvin Status, snooze status)
+**Post-Loop Nodes**:
+- `draft`, `validate`, `escalate`, `response_delivery`, `finalize`
+- Stored at top level, not within hops
 
 ---
 
@@ -320,7 +307,6 @@ The agent uses a structured state to track data across nodes:
 ### Configurable Parameters:
 
 - **Max Hops**: Default is 2, can be configured in state initialization
-- **Snooze Duration**: Default is 5 minutes (300 seconds)
 
 ---
 

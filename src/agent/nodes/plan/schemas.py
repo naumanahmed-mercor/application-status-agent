@@ -6,17 +6,28 @@ from typing import Dict, Any, List, Optional, TypedDict
 from pydantic import BaseModel, Field, validator
 
 
+class ToolCall(BaseModel):
+    """Schema for a single tool call in the plan."""
+    model_config = {"extra": "forbid"}  # Required for OpenAI structured output
+    
+    tool_name: str = Field(..., description="Name of the tool to call")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="Parameters to pass to the tool")
+    reasoning: str = Field(..., description="Why this tool call is needed")
+
+
 class PlanData(TypedDict, total=False):
     """Data structure for plan node (stored in hop)."""
     plan: Optional[Dict[str, Any]]
-    tool_calls: Optional[List[Dict[str, Any]]]
+    tool_calls: Optional[List[ToolCall]]
     reasoning: Optional[str]
 
 
 class Plan(BaseModel):
-    """Schema for the agent's execution plan."""
-    reasoning: str = Field(..., description="Why this plan was created")
-    tool_calls: List[Dict[str, Any]] = Field(..., description="List of tool calls to execute")
+    """Schema for the agent's execution plan with structured tool calls."""
+    model_config = {"extra": "forbid"}  # Required for OpenAI structured output
+    
+    reasoning: str = Field(..., description="Why this plan was created and overall strategy")
+    tool_calls: List[ToolCall] = Field(..., description="List of tool calls to execute in order")
 
 
 class PlanRequest(BaseModel):

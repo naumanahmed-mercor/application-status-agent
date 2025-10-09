@@ -15,6 +15,8 @@ class ResponseType(str, Enum):
 
 class DraftRequest(BaseModel):
     """Schema for draft node input."""
+    model_config = {"extra": "forbid"}
+    
     conversation_history: List[Dict[str, Any]] = Field(..., description="Full conversation history")
     tool_data: Optional[Dict[str, Any]] = Field(None, description="Accumulated tool data")
     docs_data: Optional[Dict[str, Any]] = Field(None, description="Accumulated docs data")
@@ -23,13 +25,19 @@ class DraftRequest(BaseModel):
 
 class DraftResponse(BaseModel):
     """Schema for draft node output."""
+    model_config = {"extra": "forbid"}
+    
     response: str = Field(..., description="Generated response text")
     response_type: ResponseType = Field(..., description="Type of response: REPLY or ROUTE_TO_TEAM")
+    escalation_reason: Optional[str] = Field(None, description="Reason for escalation if response_type is ROUTE_TO_TEAM")
 
 
 class DraftData(BaseModel):
     """Data structure for draft node (stored at state level)."""
+    model_config = {"extra": "forbid"}
+    
     response: str = Field(..., description="Generated response text")
     response_type: ResponseType = Field(..., description="Type of response")
+    escalation_reason: Optional[str] = Field(None, description="Reason for escalation if ROUTE_TO_TEAM")
     generation_time_ms: Optional[float] = Field(None, description="Time taken to generate response")
     timestamp: Optional[str] = Field(None, description="Timestamp of generation")

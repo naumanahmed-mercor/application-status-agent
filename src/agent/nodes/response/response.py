@@ -83,8 +83,23 @@ def response_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # Store response data at state level (convert to dict for state)
     state["response_delivery"] = response_data.model_dump()
     
-    # Only set next_node to finalize if not already set to escalate
-    if "next_node" not in state or state["next_node"] != "escalate":
+    # Check if draft requested escalation after response (e.g., ROUTE_TO_TEAM)
+    draft_data = state.get("draft", {})
+    should_escalate = draft_data.get("response_type") == "ROUTE_TO_TEAM"
+    
+    # Determine routing
+    if "next_node" in state and state["next_node"] == "escalate":
+        # Already set to escalate (e.g., from an error)
+        pass
+    elif should_escalate and response_data.intercom_delivered:
+        # Successfully sent message, now escalate as planned (ROUTE_TO_TEAM)
+        state["next_node"] = "escalate"
+        print(f"🔀 Message sent successfully, now routing to escalate")
+    elif not response_data.intercom_delivered:
+        # Failed to send - escalate with error
+        state["next_node"] = "escalate"
+    else:
+        # Normal flow - go to finalize
         state["next_node"] = "finalize"
     
     print(f"🎯 Response node completed - delivery: {'✅ success' if response_data.intercom_delivered else '❌ failed'}")

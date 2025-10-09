@@ -99,7 +99,7 @@ def initialize_node(state: State) -> State:
             state["tool_data"] = state.get("tool_data", {})
             state["docs_data"] = state.get("docs_data", {})
             state["hops"] = state.get("hops", [])
-            state["max_hops"] = state.get("max_hops", 2)
+            state["max_hops"] = state.get("max_hops", 3)
             state["response"] = state.get("response", "")
             state["error"] = state.get("error", None)
             state["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")

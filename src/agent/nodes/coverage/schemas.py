@@ -16,21 +16,20 @@ class CoverageData(TypedDict, total=False):
 
 class DataGap(BaseModel):
     """Schema for identifying missing data."""
+    model_config = {"extra": "forbid"}
+    
     gap_type: str = Field(..., description="Type of missing data (e.g., 'user_profile', 'application_details')")
     description: str = Field(..., description="Description of what data is missing")
 
 
 class CoverageAnalysis(BaseModel):
     """Schema for coverage analysis results."""
-    data_sufficient: bool = Field(..., description="Whether we have sufficient data to respond")
-    coverage_score: float = Field(..., ge=0.0, le=1.0, description="Coverage score (0-1)")
-    available_data: List[str] = Field(..., description="List of data types we have")
-    missing_data: List[DataGap] = Field(..., description="List of missing data gaps")
-    reasoning: str = Field(..., description="Reasoning for the coverage assessment")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in the analysis")
+    model_config = {"extra": "forbid"}
     
-    # Removed strict validation - LLM can provide missing_data even when data_sufficient is True
-    # This allows for more nuanced coverage analysis
+    data_sufficient: bool = Field(..., description="Whether we have sufficient data to respond")
+    missing_data: List[DataGap] = Field(default_factory=list, description="List of missing data gaps (empty if data is sufficient)")
+    reasoning: str = Field(..., description="Detailed reasoning for the coverage assessment")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in the analysis (0.0-1.0)")
 
 
 class CoverageRequest(BaseModel):
@@ -44,6 +43,11 @@ class CoverageRequest(BaseModel):
 
 class CoverageResponse(BaseModel):
     """Schema for coverage node output."""
-    analysis: CoverageAnalysis = Field(..., description="Coverage analysis results")
-    next_action: str = Field(..., description="Next action: 'continue', 'gather_more', 'escalate'")
-    escalation_reason: Optional[str] = Field(None, description="Reason for escalation if needed")
+    model_config = {"extra": "forbid"}
+    
+    data_sufficient: bool = Field(..., description="Whether we have sufficient data to respond")
+    missing_data: List[DataGap] = Field(default_factory=list, description="List of missing data gaps (empty if data is sufficient)")
+    reasoning: str = Field(..., description="Detailed reasoning for the coverage assessment")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in the analysis (0.0-1.0)")
+    next_action: str = Field(..., description="Next action: 'continue' (sufficient data), 'gather_more' (need more data), 'escalate' (cannot gather data)")
+    escalation_reason: Optional[str] = Field(None, description="Reason for escalation (required if next_action is 'escalate')")

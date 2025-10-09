@@ -7,6 +7,149 @@ from .schemas import PlanData, Plan, PlanRequest
 from agent.llm import planner_llm
 from src.clients.prompts import get_prompt, PROMPT_NAMES
 from src.utils.prompts import build_conversation_and_user_context
+from jsonschema import validate, ValidationError
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _validate_and_sanitize_plan(
+    plan: Plan, 
+    available_tools: List[Dict[str, Any]], 
+    verified_email: str
+) -> Plan:
+    """
+    Validate tool calls against tool schemas and sanitize email fields.
+    
+    Invalid tool calls are skipped with a warning instead of failing the entire plan.
+    
+    Args:
+        plan: Generated plan from LLM
+        available_tools: List of available tools with schemas
+        verified_email: Verified user email from Intercom (source of truth)
+        
+    Returns:
+        Validated and sanitized plan (with invalid tool calls removed)
+    """
+    # Create a lookup map for tools
+    tools_map = {tool["name"]: tool for tool in available_tools}
+    
+    validated_tool_calls = []
+    skipped_count = 0
+    
+    for i, tool_call in enumerate(plan.tool_calls, 1):
+        tool_name = tool_call.tool_name
+        
+        # 1. Validate tool exists
+        if tool_name not in tools_map:
+            available_names = ", ".join(tools_map.keys())
+            logger.warning(
+                f"⚠️  Tool call {i}: Tool '{tool_name}' not found. Skipping. "
+                f"Available tools: {available_names}"
+            )
+            print(f"   ⚠️  Skipping invalid tool: {tool_name} (not found)")
+            skipped_count += 1
+            continue
+        
+        tool_schema = tools_map[tool_name]
+        input_schema = tool_schema.get("inputSchema", {})
+        
+        # 2. Inject/replace email fields with verified email (SECURITY)
+        sanitized_params = _sanitize_email_params(
+            tool_call.parameters, 
+            verified_email,
+            input_schema
+        )
+        
+        # 3. Validate parameters against tool's input schema
+        if input_schema and input_schema.get("properties"):
+            try:
+                validate(instance=sanitized_params, schema=input_schema)
+            except ValidationError as e:
+                logger.warning(
+                    f"⚠️  Tool call {i} ({tool_name}): Parameter validation failed - {e.message}. Skipping."
+                )
+                print(f"   ⚠️  Skipping tool {tool_name}: Invalid parameters ({e.message})")
+                skipped_count += 1
+                continue
+        
+        # Create validated tool call with sanitized params
+        from .schemas import ToolCall
+        validated_tool_call = ToolCall(
+            tool_name=tool_name,
+            parameters=sanitized_params,
+            reasoning=tool_call.reasoning
+        )
+        validated_tool_calls.append(validated_tool_call)
+    
+    # Log summary if any tools were skipped
+    if skipped_count > 0:
+        logger.info(f"Validation complete: {len(validated_tool_calls)} valid, {skipped_count} skipped")
+    
+    # Return new plan with validated tool calls
+    return Plan(
+        reasoning=plan.reasoning,
+        tool_calls=validated_tool_calls
+    )
+
+
+def _sanitize_email_params(
+    params: Dict[str, Any], 
+    verified_email: str,
+    input_schema: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Inject/replace email fields in parameters with verified email from Intercom.
+    
+    This is a CRITICAL SECURITY measure to prevent the LLM from:
+    1. Hallucinating email addresses
+    2. Using incorrect email addresses
+    3. Accessing data for the wrong user
+    
+    If the tool's schema requires an email field, we ALWAYS inject the verified email,
+    regardless of what the LLM generated.
+    
+    Args:
+        params: Tool parameters (potentially containing email fields)
+        verified_email: Verified email from Intercom API (source of truth)
+        input_schema: Tool's input schema to check which email fields are expected
+        
+    Returns:
+        Sanitized parameters with verified email injected/replaced
+    """
+    sanitized = params.copy()
+    
+    # Get properties from schema to see which email fields this tool expects
+    schema_properties = input_schema.get("properties", {})
+    
+    # Common email field names to check/inject
+    email_field_candidates = ["user_email", "email", "userEmail", "Email"]
+    
+    # Find which email field(s) this tool actually uses
+    for field in email_field_candidates:
+        if field in schema_properties:
+            # This tool expects this email field
+            if field in sanitized:
+                # LLM provided an email - replace/verify it
+                original_value = sanitized[field]
+                if original_value != verified_email:
+                    # Emails don't match - REPLACE (security issue!)
+                    sanitized[field] = verified_email
+                    logger.warning(
+                        f"🔒 Security: REPLACED '{field}' "
+                        f"(LLM: '{original_value}') → verified: '{verified_email}'"
+                    )
+                else:
+                    # Emails match - verified successfully
+                    logger.debug(f"Security: Verified '{field}' = '{verified_email}'")
+            else:
+                # LLM didn't provide email - inject it
+                sanitized[field] = verified_email
+                logger.warning(
+                    f"🔒 Security: INJECTED '{field}' = '{verified_email}' (missing from LLM output)"
+                )
+    
+    return sanitized
 
 
 def plan_node(state: State) -> State:
@@ -58,17 +201,27 @@ def plan_node(state: State) -> State:
         # Generate plan using LLM
         plan = _generate_plan(plan_request, available_tools)
         
+        # Get verified email from Intercom (source of truth)
+        user_details = state.get("user_details", {})
+        verified_email = user_details.get("email", "")
+        
+        # Validate and sanitize the plan (check tool schemas, replace email fields)
+        validated_plan = _validate_and_sanitize_plan(plan, available_tools, verified_email)
+        
         # Store plan in nested structure using PlanData TypedDict
+        # Convert ToolCall objects to dictionaries for state storage
+        tool_calls_dicts = [tc.model_dump() for tc in validated_plan.tool_calls]
+        
         plan_data: PlanData = {
-            "plan": plan.model_dump(),
-            "tool_calls": plan.tool_calls,
-            "reasoning": plan.reasoning,
+            "plan": validated_plan.model_dump(),
+            "tool_calls": tool_calls_dicts,
+            "reasoning": validated_plan.reasoning,
         }
         hop_data["plan"] = plan_data
         
-        print(f"📋 Plan generated (Hop {current_hop + 1}): {len(plan.tool_calls)} tools to execute")
-        for i, tool_call in enumerate(plan.tool_calls, 1):
-            print(f"   {i}. {tool_call.get('tool_name', 'Unknown')} - {tool_call.get('reasoning', 'N/A')}")
+        print(f"📋 Plan generated (Hop {current_hop + 1}): {len(validated_plan.tool_calls)} tools to execute")
+        for i, tool_call in enumerate(validated_plan.tool_calls, 1):
+            print(f"   {i}. {tool_call.tool_name} - {tool_call.reasoning}")
         
     except Exception as e:
         error_msg = f"Plan generation failed: {str(e)}"
@@ -115,30 +268,14 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
         available_tools=_format_tools_for_prompt(available_tools)
     )
     
-    # Get LLM response
+    # Get LLM response with structured output
+    # Use function_calling method since Plan schema contains Dict[str, Any] 
+    # which is not supported by OpenAI's native structured output
     llm = planner_llm()
-    response = llm.invoke(prompt)
+    llm_with_structure = llm.with_structured_output(Plan, method="function_calling")
+    plan = llm_with_structure.invoke(prompt)
     
-    # Parse JSON response
-    try:
-        import json
-        plan_data = json.loads(response.content)
-        
-        # Create tool calls as simple dictionaries
-        tool_calls = plan_data.get("tool_calls", [])
-        
-        # Create Plan object
-        plan = Plan(
-            reasoning=plan_data.get("reasoning", "Generated plan"),
-            tool_calls=tool_calls
-        )
-        
-        return plan
-        
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse LLM response as JSON: {e}")
-    except Exception as e:
-        raise ValueError(f"Failed to create plan: {e}")
+    return plan
 
 
 def _format_tools_for_prompt(tools: List[Dict[str, Any]]) -> str:
@@ -209,7 +346,7 @@ def _format_context_for_prompt(context: Dict[str, Any]) -> str:
     
     # Hop information
     current_hop = context.get("current_hop", 0)
-    max_hops = context.get("max_hops", 2)
+    max_hops = context.get("max_hops", 3)
     context_parts.append(f"- Current hop: {current_hop + 1}/{max_hops}")
     
     # Previous execution results

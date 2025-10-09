@@ -53,7 +53,13 @@ def run_agent_with_conversation_id(conversation_id: str) -> dict:
         "docs_data": docs_data,  # Individual docs results by query/topic
         # Loop management
         "hops": hops_array,
-        "max_hops": final_state.get("max_hops", 2),
+        "max_hops": final_state.get("max_hops", 3),
+        # Node execution data (state level)
+        "draft": final_state.get("draft"),
+        "validate": final_state.get("validate"),
+        "response_delivery": final_state.get("response_delivery"),
+        "escalate": final_state.get("escalate"),
+        "finalize": final_state.get("finalize"),
         # Routing
         "next_node": final_state.get("next_node"),
         "escalation_reason": final_state.get("escalation_reason")

@@ -1,7 +1,7 @@
 """Coverage node implementation for analyzing data sufficiency."""
 
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from agent.types import State
 from .schemas import CoverageData, CoverageResponse, CoverageAnalysis, DataGap
 from agent.llm import planner_llm
@@ -24,7 +24,7 @@ def coverage_node(state: State) -> State:
     current_hop_index = len(state["hops"]) - 1
     current_hop_data = state["hops"][current_hop_index]
     hop_number = current_hop_data.get("hop_number", current_hop_index + 1)
-    max_hops = state.get("max_hops", 2)
+    max_hops = state.get("max_hops", 3)
     
     print(f"🔍 Coverage Analysis (Hop {hop_number}/{max_hops})")
     print("=" * 50)
@@ -58,6 +58,10 @@ def coverage_node(state: State) -> State:
         return state
     
     try:
+        # Get plan reasoning from current hop (if available)
+        plan_reasoning = None
+        if current_hop_data.get("plan"):
+            plan_reasoning = current_hop_data["plan"].get("reasoning")
         
         # Perform coverage analysis with full conversation history
         coverage_response = _analyze_coverage(
@@ -66,7 +70,8 @@ def coverage_node(state: State) -> State:
             tool_data,
             docs_data,
             hop_number,
-            max_hops
+            max_hops,
+            plan_reasoning
         )
         
         # Update routing state - convert next_action to next_node
@@ -83,21 +88,20 @@ def coverage_node(state: State) -> State:
         
         # Store coverage analysis in nested structure using CoverageData TypedDict
         coverage_data: CoverageData = {
-            "coverage_analysis": coverage_response.analysis.model_dump(),
-            "data_sufficient": coverage_response.analysis.data_sufficient,
+            "coverage_analysis": coverage_response.model_dump(),
+            "data_sufficient": coverage_response.data_sufficient,
             "next_node": state["next_node"],  # Use the converted next_node
             "escalation_reason": coverage_response.escalation_reason
         }
         current_hop_data["coverage"] = coverage_data
         
         # Print analysis results
-        print(f"📊 Coverage Score: {coverage_response.analysis.coverage_score:.1%}")
-        print(f"✅ Data Sufficient: {coverage_response.analysis.data_sufficient}")
-        print(f"📋 Available Data: {', '.join(coverage_response.analysis.available_data)}")
+        print(f"✅ Data Sufficient: {coverage_response.data_sufficient}")
+        print(f"💭 Reasoning: {coverage_response.reasoning}")
         
-        if coverage_response.analysis.missing_data:
+        if coverage_response.missing_data:
             print(f"❌ Missing Data:")
-            for gap in coverage_response.analysis.missing_data:
+            for gap in coverage_response.missing_data:
                 print(f"   - {gap.gap_type}: {gap.description}")
         
         print(f"🎯 Next Action: {coverage_response.next_action}")
@@ -135,7 +139,8 @@ def _analyze_coverage(
     tool_data: Dict[str, Any],
     docs_data: Dict[str, Any],
     hop_number: int,
-    max_hops: int
+    max_hops: int,
+    plan_reasoning: Optional[str] = None
 ) -> CoverageResponse:
     """
     Analyze data coverage using LLM.
@@ -147,6 +152,7 @@ def _analyze_coverage(
         docs_data: Accumulated docs data
         hop_number: Current hop number
         max_hops: Maximum allowed hops
+        plan_reasoning: Reasoning from plan node explaining why tools were/weren't chosen
         
     Returns:
         Coverage analysis response
@@ -155,83 +161,50 @@ def _analyze_coverage(
     # Get prompt from LangSmith
     prompt_template = get_prompt(PROMPT_NAMES["COVERAGE_NODE"])
     
+    # Format available data summary
+    available_data_summary = _summarize_accumulated_data_with_content(tool_data, docs_data, plan_reasoning)
+    
     # Format the prompt with variables
     prompt = prompt_template.format(
         conversation_history=conversation_history,
         user_details=user_details,
-        available_data=_summarize_accumulated_data_with_content(tool_data, docs_data)
+        available_data=available_data_summary
     )
     
-    # Get LLM response
+    # Get LLM response with structured output
     llm = planner_llm()
-    response = llm.invoke(prompt)
+    llm_with_structure = llm.with_structured_output(CoverageResponse, method="function_calling")
     
-    # Parse JSON response
     try:
-        import json
+        coverage_response = llm_with_structure.invoke(prompt)
         
-        # Extract JSON from response (handle extra text)
-        content = response.content.strip()
+        # Check if we've hit max hops - override to escalate if needed
+        if not coverage_response.data_sufficient and hop_number >= max_hops:
+            print(f"⚠️  Maximum hops ({max_hops}) reached - escalating instead of gathering more")
+            coverage_response.next_action = "escalate"
+            coverage_response.escalation_reason = f"Exceeded maximum hops ({max_hops}). Unable to gather sufficient data."
         
-        # Try to find JSON object in the response - look for the first complete JSON object
-        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content, re.DOTALL)
-        if json_match:
-            json_str = json_match.group()
-        else:
-            # Fallback: try to extract JSON from lines that look like JSON
-            lines = content.split('\n')
-            json_lines = []
-            in_json = False
-            for line in lines:
-                if line.strip().startswith('{'):
-                    in_json = True
-                if in_json:
-                    json_lines.append(line)
-                    if line.strip().endswith('}') and line.count('{') == line.count('}'):
-                        break
-            json_str = '\n'.join(json_lines)
+        return coverage_response
         
-        analysis_data = json.loads(json_str)
-        
-        # Create DataGap objects (filter out priority field if present)
-        missing_data = []
-        for gap_data in analysis_data.get("missing_data", []):
-            # Remove priority field if it exists (we don't use it anymore)
-            gap_data_clean = {k: v for k, v in gap_data.items() if k != "priority"}
-            gap = DataGap(**gap_data_clean)
-            missing_data.append(gap)
-        
-        # Create CoverageAnalysis object
-        analysis = CoverageAnalysis(
-            data_sufficient=analysis_data.get("data_sufficient", False),
-            coverage_score=analysis_data.get("coverage_score", 0.0),
-            available_data=analysis_data.get("available_data", []),
-            missing_data=missing_data,
-            reasoning=analysis_data.get("reasoning", "Coverage analysis completed"),
-            confidence=analysis_data.get("confidence", 0.5)
-        )
-        
-        # Determine next action
-        next_action = _determine_next_action(analysis, {"hops": hop_number, "max_hops": max_hops})
-        escalation_reason = _get_escalation_reason(analysis, next_action)
-        
-        return CoverageResponse(
-            analysis=analysis,
-            next_action=next_action,
-            escalation_reason=escalation_reason
-        )
-        
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse LLM response as JSON: {e}")
     except Exception as e:
-        raise ValueError(f"Failed to create coverage analysis: {e}")
+        raise ValueError(f"Failed to get coverage analysis: {e}")
 
 
 
 
-def _summarize_accumulated_data_with_content(tool_data: Dict[str, Any], docs_data: Dict[str, Any]) -> str:
+def _summarize_accumulated_data_with_content(
+    tool_data: Dict[str, Any], 
+    docs_data: Dict[str, Any],
+    plan_reasoning: Optional[str] = None
+) -> str:
     """Summarize accumulated tool and docs data with actual content for LLM prompt."""
     summary = []
+    
+    # Plan reasoning section (helps explain why tools were/weren't chosen)
+    if plan_reasoning:
+        summary.append("PLAN REASONING:")
+        summary.append(f"  {plan_reasoning}")
+        summary.append("")  # blank line
     
     # Tool data section
     if tool_data:
@@ -278,26 +251,3 @@ def _format_data_content(data: Any) -> List[str]:
         content.append(f"  {str(data)}")
     
     return content
-
-
-def _determine_next_action(analysis: CoverageAnalysis, context: Dict[str, Any]) -> str:
-    """Determine the next action based on coverage analysis."""
-    if analysis.data_sufficient:
-        return "continue"
-    
-    # If we don't have sufficient data, try to gather more
-    return "gather_more"
-
-
-def _get_escalation_reason(analysis: CoverageAnalysis, next_action: str) -> str:
-    """Get escalation reason if applicable."""
-    if next_action != "escalate":
-        return None
-    
-    if analysis.coverage_score < 0.3:
-        return "Very low coverage score, insufficient data quality"
-    
-    if not analysis.missing_data:
-        return "No specific data gaps identified but coverage insufficient"
-    
-    return "Unable to gather sufficient data to answer query"

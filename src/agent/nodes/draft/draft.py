@@ -55,6 +55,7 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
         draft_data = DraftData(
             response=response["response"],
             response_type=ResponseType(response["response_type"]),
+            escalation_reason=response.get("escalation_reason"),
             generation_time_ms=generation_time,
             timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ")
         )
@@ -65,9 +66,11 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
         
         # Route based on response type
         if response["response_type"] == "ROUTE_TO_TEAM":
-            state["next_node"] = "escalate"
-            state["escalation_reason"] = "User requested to talk to a human"
-            print(f"🔀 Response type: ROUTE_TO_TEAM - routing to escalate")
+            # Send response first, then escalate (response node will check draft.response_type)
+            state["next_node"] = "validate"
+            state["escalation_reason"] = response.get("escalation_reason", "User needs to speak with the team")
+            print(f"🔀 Response type: ROUTE_TO_TEAM - will send message then escalate")
+            print(f"📝 Escalation reason: {state['escalation_reason']}")
         else:
             state["next_node"] = "validate"
             print(f"✅ Response generated ({generation_time:.1f}ms)")
@@ -119,14 +122,17 @@ def _generate_response(
     # Create system prompt with conversation context and user details
     system_prompt = _create_system_prompt(conversation_history, user_details, context_data)
     
-    # Generate response
-    response = llm.invoke(system_prompt)
+    # Generate response with structured output
+    from .schemas import DraftResponse
+    llm_with_structure = llm.with_structured_output(DraftResponse, method="function_calling")
+    draft_response = llm_with_structure.invoke(system_prompt)
     
-    # Extract text content from response
-    response_text = response.content if hasattr(response, 'content') else str(response)
-    
-    # Parse and structure the response
-    return _parse_response(response_text, context_data)
+    # Return as dict for backwards compatibility
+    return {
+        "response": draft_response.response,
+        "response_type": draft_response.response_type.value,
+        "escalation_reason": draft_response.escalation_reason
+    }
 
 
 def _prepare_context_data(tool_data: Dict[str, Any], docs_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -307,44 +313,3 @@ def _create_system_prompt(conversation_history: str, user_details: str, context_
     )
 
     return prompt
-
-
-def _parse_response(response_text: str, context_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Parse and structure the LLM response.
-    LLM returns: {"text": str, "response_type": str}
-    We convert to: {"response": str, "response_type": str}
-    
-    Args:
-        response_text: Raw LLM response
-        context_data: Context data used for generation
-        
-    Returns:
-        Response in format {"response": str, "response_type": "REPLY" or "ROUTE_TO_TEAM"}
-    """
-    # Try to parse as JSON first, then fall back to plain text
-    try:
-        import json
-        parsed = json.loads(response_text)
-        if isinstance(parsed, dict):
-            # LLM uses "text", we convert to "response"
-            # Also check for "response" for backwards compatibility
-            response = parsed.get("text") or parsed.get("response", response_text)
-            
-            # Default to "REPLY" if response_type not provided (backwards compatibility)
-            response_type = parsed.get("response_type", "REPLY")
-            
-            # Validate response_type
-            if response_type not in ["REPLY", "ROUTE_TO_TEAM"]:
-                response_type = "REPLY"
-            
-            return {
-                "response": response,
-                "response_type": response_type
-            }
-        else:
-            # If it's JSON but not a dict, wrap it
-            return {"response": response_text, "response_type": "REPLY"}
-    except (json.JSONDecodeError, TypeError):
-        # If it's not JSON, treat as plain text with REPLY type (backwards compatibility)
-        return {"response": response_text, "response_type": "REPLY"}

@@ -4,9 +4,9 @@ from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
-    from agent.nodes.plan.schemas import PlanData
-    from agent.nodes.gather.schemas import GatherData
-    from agent.nodes.coverage.schemas import CoverageData
+    from ts_agent.nodes.plan.schemas import PlanData
+    from ts_agent.nodes.gather.schemas import GatherData
+    from ts_agent.nodes.coverage.schemas import CoverageData
 
 
 class HopData(TypedDict, total=False):

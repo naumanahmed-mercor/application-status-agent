@@ -1,6 +1,6 @@
 from langgraph.pregel import Pregel
 
-from agent.graph import graph
+from ts_agent.graph import graph
 
 
 def test_graph_compilation() -> None:

@@ -1,7 +1,7 @@
 """Smoke tests for the minimal agent flow."""
 
 import pytest
-from src.agent.runner import run_agent
+from src.ts_agent.runner import run_agent
 
 
 def test_basic_agent_flow():

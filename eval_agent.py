@@ -38,7 +38,7 @@ if langsmith_key == "NOT_SET":
 else:
     print(f"✅ LangSmith API Key configured\n")
 
-from agent.runner import run_agent_with_conversation_id
+from ts_agent.runner import run_agent_with_conversation_id
 
 
 def extract_messages(result: dict) -> str:

@@ -106,7 +106,7 @@ python scripts/run_agent.py 215471174574005
 
 ```python
 import os
-from agent.runner import run_agent
+from ts_agent.runner import run_agent
 
 # Enable dry-run mode
 os.environ["DRY_RUN"] = "true"
@@ -141,7 +141,7 @@ for r in results:
 
 ```python
 import os
-from agent.runner import run_agent
+from ts_agent.runner import run_agent
 from clients.intercom import IntercomClient
 
 # Get the real conversation

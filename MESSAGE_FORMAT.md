@@ -96,7 +96,7 @@ curl -X POST http://localhost:8123/threads \
 
 ### Direct Runner
 ```python
-from src.agent.runner import run_agent_with_messages
+from src.ts_agent.runner import run_agent_with_messages
 
 # Single message
 result = run_agent_with_messages([

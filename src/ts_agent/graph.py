@@ -1,16 +1,16 @@
 """LangGraph for the agent."""
 
 from langgraph.graph import StateGraph, START, END
-from agent.types import State
-from agent.nodes.initialize.initialize import initialize_node
-from agent.nodes.plan.plan import plan_node
-from agent.nodes.gather.gather import gather_node
-from agent.nodes.coverage.coverage import coverage_node
-from agent.nodes.draft.draft import draft_node
-from agent.nodes.validate.validate import validate_node
-from agent.nodes.escalate.escalate import escalate_node
-from agent.nodes.response.response import response_node
-from agent.nodes.finalize.finalize import finalize_node
+from ts_agent.types import State
+from ts_agent.nodes.initialize.initialize import initialize_node
+from ts_agent.nodes.plan.plan import plan_node
+from ts_agent.nodes.gather.gather import gather_node
+from ts_agent.nodes.coverage.coverage import coverage_node
+from ts_agent.nodes.draft.draft import draft_node
+from ts_agent.nodes.validate.validate import validate_node
+from ts_agent.nodes.escalate.escalate import escalate_node
+from ts_agent.nodes.response.response import response_node
+from ts_agent.nodes.finalize.finalize import finalize_node
 
 
 def build_graph():

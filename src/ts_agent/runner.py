@@ -2,7 +2,7 @@
 
 import time
 from typing import Dict, Any, Optional
-from agent.graph import build_graph
+from ts_agent.graph import build_graph
 
 _app = build_graph()
 

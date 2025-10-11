@@ -6,7 +6,7 @@ Generates a response based on accumulated tool data and docs data.
 import time
 import json
 from typing import Dict, Any, List
-from agent.llm import drafter_llm
+from ts_agent.llm import drafter_llm
 from src.clients.prompts import get_prompt, PROMPT_NAMES
 from src.utils.prompts import build_conversation_and_user_context
 from .schemas import DraftData, ResponseType

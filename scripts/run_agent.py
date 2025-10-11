@@ -8,8 +8,8 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from agent.runner import run_agent
-from agent.types import AgentInput
+from ts_agent.runner import run_agent
+from ts_agent.types import AgentInput
 
 
 def main():

@@ -5,7 +5,7 @@ Initialize node for setting up conversation data and available tools.
 import os
 import time
 from typing import Dict, Any
-from agent.types import State
+from ts_agent.types import State
 from src.clients.intercom import IntercomClient
 from src.mcp.factory import create_mcp_client
 from .schemas import InitializeData

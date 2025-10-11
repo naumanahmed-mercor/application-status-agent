@@ -22,8 +22,8 @@ cp env.example .env
 
 #### Multi-Message Conversation
 ```python
-from src.agent.runner import run_agent
-from src.agent.types import Message
+from src.ts_agent.runner import run_agent
+from src.ts_agent.types import Message
 
 # Create conversation history
 messages = [

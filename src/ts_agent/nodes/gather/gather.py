@@ -2,7 +2,7 @@
 
 import time
 from typing import Dict, Any, List
-from agent.types import State
+from ts_agent.types import State
 from .schemas import GatherData, ToolCall, ToolResult, GatherRequest
 from src.mcp.factory import create_mcp_client
 

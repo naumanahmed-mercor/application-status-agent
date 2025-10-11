@@ -144,8 +144,17 @@ def gather_node(state: State) -> State:
                     unique_key = f"{query} (hop {current_hop})"
                     state["docs_data"][unique_key] = result.data
                 else:
-                    # Store regular tool data
-                    state["tool_data"][result.tool_name] = result.data
+                    # Store regular tool data - accumulate if tool called multiple times
+                    if result.tool_name in state["tool_data"]:
+                        # Tool already called - accumulate results in a list
+                        existing = state["tool_data"][result.tool_name]
+                        if not isinstance(existing, list):
+                            existing = [existing]
+                        existing.append(result.data)
+                        state["tool_data"][result.tool_name] = existing
+                    else:
+                        # First call to this tool
+                        state["tool_data"][result.tool_name] = result.data
         
         print(f"🎉 Tool execution complete!")
         print(f"   ✅ Successful: {len(successful_tools)}")

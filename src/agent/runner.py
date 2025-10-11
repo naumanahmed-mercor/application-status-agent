@@ -43,11 +43,16 @@ def run_agent_with_conversation_id(conversation_id: str) -> dict:
     tool_data = final_state.get("tool_data", {})
     docs_data = final_state.get("docs_data", {})
     
+    # Extract user email from user_details
+    user_details = final_state.get("user_details", {})
+    user_email = user_details.get("email") if user_details else None
+    
     return {
         "response": response,
         "error": error,
         "conversation_id": conversation_id,
-        "user_email": final_state.get("user_email"),
+        "user_email": user_email,
+        "messages": final_state.get("messages", []),
         # Data (independent of hops)
         "tool_data": tool_data,  # Individual tool results by tool name
         "docs_data": docs_data,  # Individual docs results by query/topic

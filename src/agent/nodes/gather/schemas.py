@@ -3,7 +3,7 @@ Schemas for the Gather node.
 """
 
 from typing import Dict, Any, List, Optional, TypedDict
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 
 
 class GatherData(TypedDict, total=False):
@@ -27,61 +27,8 @@ class ToolCall(BaseModel):
     parameters: Dict[str, Any] = Field(..., description="Parameters for the tool call")
     reasoning: str = Field(..., description="Why this tool is needed")
     
-    @validator('tool_name')
-    def validate_tool_name(cls, v):
-        """Validate that the tool name exists in available tools."""
-        available_tools = [
-            "get_user_background_status",
-            "get_user_applications", 
-            "get_user_applications_detailed",
-            "get_user_jobs",
-            "get_user_interviews",
-            "get_user_work_trials",
-            "get_user_fraud_reports",
-            "get_user_details",
-            "search_talent_docs",
-            "get_talent_docs_stats"
-        ]
-        if v not in available_tools:
-            raise ValueError(f"Tool '{v}' is not available. Available tools: {available_tools}")
-        return v
-    
-    @validator('parameters')
-    def validate_parameters(cls, v, values):
-        """Validate parameters based on tool requirements."""
-        tool_name = values.get('tool_name')
-        if not tool_name:
-            return v
-            
-        # Define required parameters for each tool
-        tool_requirements = {
-            "get_user_background_status": ["user_email"],
-            "get_user_applications": ["user_email"],
-            "get_user_applications_detailed": ["user_email"],
-            "get_user_jobs": ["user_email"],
-            "get_user_interviews": ["user_email"],
-            "get_user_work_trials": ["user_email"],
-            "get_user_fraud_reports": ["user_email"],
-            "get_user_details": ["user_email"],
-            "search_talent_docs": ["query"],
-            "get_talent_docs_stats": []
-        }
-        
-        required_params = tool_requirements.get(tool_name, [])
-        
-        # Check if all required parameters are provided
-        for param in required_params:
-            if param not in v:
-                raise ValueError(f"Tool '{tool_name}' requires parameter '{param}'")
-        
-        # Validate specific parameter types
-        if tool_name == "search_talent_docs":
-            if "threshold" in v and not isinstance(v["threshold"], (int, float)):
-                raise ValueError("threshold must be a number")
-            if "limit" in v and not isinstance(v["limit"], int):
-                raise ValueError("limit must be an integer")
-        
-        return v
+    # Note: Tool name and parameter validation is done in the plan node against
+    # actual available tools and their schemas from the MCP server
 
 
 class ToolResult(BaseModel):

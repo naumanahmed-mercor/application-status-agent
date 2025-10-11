@@ -261,12 +261,22 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
     prompt_template = get_prompt(PROMPT_NAMES["PLAN_NODE"])
     
     # Format the prompt with variables
+    formatted_tools = _format_tools_for_prompt(available_tools)
     prompt = prompt_template.format(
         conversation_history=conversation_history,
         user_details=user_details,
         context_info=context_info,
-        available_tools=_format_tools_for_prompt(available_tools)
+        available_tools=formatted_tools
     )
+    
+    # Debug: Print full prompt being sent to LLM
+    import os
+    if os.getenv("DEBUG_PLAN_CONTEXT") == "true":
+        print(f"\n{'='*80}")
+        print("🔍 DEBUG: FULL PROMPT Being Sent to Plan LLM")
+        print(f"{'='*80}")
+        print(prompt)
+        print(f"{'='*80}\n")
     
     # Get LLM response with structured output
     # Use function_calling method since Plan schema contains Dict[str, Any] 
@@ -279,58 +289,102 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
 
 
 def _format_tools_for_prompt(tools: List[Dict[str, Any]]) -> str:
-    """Format tools for LLM prompt."""
+    """Format tools for LLM prompt with full schemas."""
+    import json
     formatted = []
+    
     for tool in tools:
         name = tool.get("name", "unknown")
         description = tool.get("description", "No description available")
-        formatted.append(f"- {name}: {description}")
-    return "\n".join(formatted)
+        input_schema = tool.get("inputSchema", {})
+        
+        # Format tool with full schema
+        tool_str = f"Tool: {name}\n"
+        tool_str += f"Description: {description}\n"
+        tool_str += f"Input Schema:\n{json.dumps(input_schema, indent=2)}"
+        
+        formatted.append(tool_str)
+    
+    return "\n\n".join(formatted)
 
 
 def _build_context_from_hops(hops_array: List[Dict[str, Any]], state: State) -> Dict[str, Any]:
     """Build context from previous hops for planning."""
+    # Current hop is the next one to plan (len of completed hops + 1)
+    current_hop = len(hops_array) + 1
+    
     context = {
         "timestamp": state.get("timestamp"),
-        "current_hop": state.get("current_hop", 0),
-        "max_hops": state.get("max_hops", 2),
-        "previous_tools": [],
-        "failed_tools": [],
-        "coverage_analysis": None,
-        "missing_data": [],
-        "needs_more_data": False
+        "current_hop": current_hop,
+        "max_hops": state.get("max_hops", 3),
+        "tool_executions": [],  # List of {tool_name, parameters, success, error}
+        "doc_searches": [],  # List of {query, result_count, success}
+        "coverage_analysis": None
     }
     
     # Aggregate data from all previous hops
     for hop in hops_array:
-        # Get gather data
+        # Get plan data to extract tool calls with parameters
+        plan_data = hop.get("plan", {})
+        tool_calls_from_plan = plan_data.get("tool_calls", [])
+        
+        # Get gather data to see results
         gather_data = hop.get("gather", {})
         if gather_data:
             tool_results = gather_data.get("tool_results", [])
-            for result in tool_results:
-                if result.get("success"):
-                    context["previous_tools"].append(result.get("tool_name", "unknown"))
+            
+            # Match tool results with their plan by index (order matters)
+            for idx, result in enumerate(tool_results):
+                tool_name = result.get("tool_name", "unknown")
+                success = result.get("success", False)
+                error = result.get("error")
+                
+                # Get parameters from the corresponding tool call by index
+                parameters = {}
+                if idx < len(tool_calls_from_plan):
+                    tool_call = tool_calls_from_plan[idx]
+                    # Verify tool names match (sanity check)
+                    if tool_call.get("tool_name") == tool_name:
+                        parameters = tool_call.get("parameters", {})
+                
+                # Special handling for doc searches
+                if tool_name == "search_talent_docs":
+                    query = parameters.get("query", "unknown query")
+                    result_count = 0
+                    if success and result.get("data"):
+                        # Parse result data to get count
+                        data_list = result.get("data", [])
+                        if data_list and isinstance(data_list, list):
+                            for item in data_list:
+                                if isinstance(item, dict) and item.get("type") == "text":
+                                    try:
+                                        import json
+                                        parsed = json.loads(item.get("text", "{}"))
+                                        result_count = parsed.get("total_results", 0)
+                                        break
+                                    except:
+                                        pass
+                    
+                    context["doc_searches"].append({
+                        "query": query,
+                        "result_count": result_count,
+                        "success": success
+                    })
                 else:
-                    context["failed_tools"].append(result.get("tool_name", "unknown"))
+                    # Regular tool execution
+                    context["tool_executions"].append({
+                        "tool_name": tool_name,
+                        "parameters": parameters,
+                        "success": success,
+                        "error": error if not success else None
+                    })
         
-        # Get coverage data
+        # Get coverage data (will be overwritten by latest hop)
         coverage_data = hop.get("coverage", {})
         if coverage_data:
-            # Get coverage analysis from the most recent hop
+            # Always overwrite with latest hop's coverage analysis (only reasoning will be used)
             if coverage_data.get("coverage_analysis"):
                 context["coverage_analysis"] = coverage_data["coverage_analysis"]
-            
-            # Collect missing data
-            if coverage_data.get("missing_data"):
-                context["missing_data"].extend(coverage_data["missing_data"])
-            
-            # Check if more data is needed
-            if coverage_data.get("needs_more_data"):
-                context["needs_more_data"] = True
-    
-    # Remove duplicates
-    context["previous_tools"] = list(set(context["previous_tools"]))
-    context["failed_tools"] = list(set(context["failed_tools"]))
     
     return context
 
@@ -345,44 +399,47 @@ def _format_context_for_prompt(context: Dict[str, Any]) -> str:
     context_parts = []
     
     # Hop information
-    current_hop = context.get("current_hop", 0)
+    current_hop = context.get("current_hop", 1)
     max_hops = context.get("max_hops", 3)
-    context_parts.append(f"- Current hop: {current_hop + 1}/{max_hops}")
+    context_parts.append(f"- Planning for hop: {current_hop}/{max_hops}")
     
-    # Previous execution results
-    previous_tools = context.get("previous_tools", [])
-    failed_tools = context.get("failed_tools", [])
+    # Previous tool executions with signatures
+    tool_executions = context.get("tool_executions", [])
+    if tool_executions:
+        context_parts.append("\n- Previously executed tools:")
+        for execution in tool_executions:
+            tool_name = execution.get("tool_name", "unknown")
+            params = execution.get("parameters", {})
+            success = execution.get("success", False)
+            error = execution.get("error")
+            
+            # Format parameters compactly
+            param_str = ", ".join([f"{k}={repr(v)}" for k, v in params.items()])
+            status = "✓ SUCCESS" if success else f"✗ FAILED ({error})"
+            context_parts.append(f"  * {tool_name}({param_str}) - {status}")
     
-    if previous_tools:
-        context_parts.append(f"- Previously executed tools: {', '.join(previous_tools)}")
-    if failed_tools:
-        context_parts.append(f"- Previously failed tools: {', '.join(failed_tools)}")
+    # Previous doc searches with result counts
+    doc_searches = context.get("doc_searches", [])
+    if doc_searches:
+        context_parts.append("\n- Previously searched documentation:")
+        for search in doc_searches:
+            query = search.get("query", "unknown")
+            result_count = search.get("result_count", 0)
+            success = search.get("success", False)
+            status = f"{result_count} results" if success else "FAILED"
+            context_parts.append(f"  * '{query}' - {status}")
     
-    # Coverage analysis results
+    # Coverage analysis results (only reasoning from latest hop)
     coverage_analysis = context.get("coverage_analysis")
     if coverage_analysis:
-        context_parts.append(f"- Previous coverage score: {coverage_analysis.get('coverage_score', 0):.1%}")
-        context_parts.append(f"- Data sufficient: {coverage_analysis.get('data_sufficient', False)}")
-    
-    # Missing data gaps
-    missing_data = context.get("missing_data", [])
-    if missing_data:
-        context_parts.append("- Identified data gaps:")
-        for gap in missing_data:
-            if isinstance(gap, dict):
-                gap_type = gap.get("gap_type", "Unknown")
-                description = gap.get("description", "No description")
-                context_parts.append(f"  * {gap_type}: {description}")
+        reasoning = coverage_analysis.get('reasoning', '')
+        if reasoning:
+            context_parts.append(f"\n- Coverage analysis from previous hop: {reasoning}")
     
     # Available docs
     available_docs = context.get("available_docs", [])
     if available_docs:
-        context_parts.append(f"- Available docs: {', '.join(available_docs)}")
-    
-    # Needs more data flag
-    needs_more_data = context.get("needs_more_data", False)
-    if needs_more_data:
-        context_parts.append("- This is a follow-up planning cycle to gather more data")
+        context_parts.append(f"\n- Available documentation collected: {len(available_docs)} searches")
     
     return "\n".join(context_parts) if context_parts else "No relevant context available"
 

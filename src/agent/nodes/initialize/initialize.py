@@ -79,7 +79,7 @@ def initialize_node(state: State) -> State:
             }
             state["subject"] = conversation_data.get("subject") or ""  # Default to empty string if None
             
-            print(f"✅ Fetched {len(conversation_data['messages'])} messages from Intercom")
+            print(f"✅ Using {len(state['messages'])} message(s) from Intercom")
             print(f"✅ User name: {conversation_data.get('user_name', 'Not found')}")
             print(f"✅ User email: {conversation_data.get('user_email', 'Not found')}")
             print(f"✅ Subject: {conversation_data.get('subject', 'None')}")
@@ -107,7 +107,7 @@ def initialize_node(state: State) -> State:
             # Store initialize data using Pydantic model
             initialize_data = InitializeData(
                 conversation_id=conversation_id,
-                messages_count=len(conversation_data["messages"]),
+                messages_count=len(state["messages"]),
                 user_name=conversation_data.get("user_name"),
                 user_email=conversation_data.get("user_email"),
                 subject=conversation_data.get("subject"),

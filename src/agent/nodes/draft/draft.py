@@ -40,13 +40,23 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
         return state
     
     try:
+        # Get latest coverage reasoning from most recent hop
+        coverage_reasoning = None
+        hops = state.get("hops", [])
+        if hops:
+            # Get the most recent hop's coverage reasoning
+            latest_hop = hops[-1]
+            coverage_data = latest_hop.get("coverage", {})
+            if coverage_data and coverage_data.get("coverage_analysis"):
+                coverage_reasoning = coverage_data["coverage_analysis"].get("reasoning")
         
         # Generate response using LLM
         response = _generate_response(
             formatted_context["conversation_history"],
             formatted_context["user_details"],
             tool_data,
-            docs_data
+            docs_data,
+            coverage_reasoning
         )
         
         generation_time = (time.time() - start_time) * 1000
@@ -100,7 +110,8 @@ def _generate_response(
     conversation_history: str,
     user_details: str,
     tool_data: Dict[str, Any],
-    docs_data: Dict[str, Any]
+    docs_data: Dict[str, Any],
+    coverage_reasoning: str = None
 ) -> Dict[str, Any]:
     """
     Generate a response using LLM based on accumulated data.
@@ -110,6 +121,7 @@ def _generate_response(
         user_details: Formatted user details string
         tool_data: Accumulated tool data
         docs_data: Accumulated docs data
+        coverage_reasoning: Reasoning from latest coverage analysis (optional)
         
     Returns:
         Generated response with metadata
@@ -120,7 +132,7 @@ def _generate_response(
     context_data = _prepare_context_data(tool_data, docs_data)
     
     # Create system prompt with conversation context and user details
-    system_prompt = _create_system_prompt(conversation_history, user_details, context_data)
+    system_prompt = _create_system_prompt(conversation_history, user_details, context_data, coverage_reasoning)
     
     # Generate response with structured output
     from .schemas import DraftResponse
@@ -250,7 +262,7 @@ def _prepare_context_data(tool_data: Dict[str, Any], docs_data: Dict[str, Any]) 
     return context
 
 
-def _create_system_prompt(conversation_history: str, user_details: str, context_data: Dict[str, Any]) -> str:
+def _create_system_prompt(conversation_history: str, user_details: str, context_data: Dict[str, Any], coverage_reasoning: str = None) -> str:
     """
     Create system prompt for response generation.
     
@@ -258,12 +270,17 @@ def _create_system_prompt(conversation_history: str, user_details: str, context_
         conversation_history: Formatted conversation history string
         user_details: Formatted user details string
         context_data: Prepared context data
+        coverage_reasoning: Reasoning from latest coverage analysis (optional)
         
     Returns:
         System prompt string
     """
     # Build available data summary
     data_summary = []
+    
+    # Add coverage reasoning at the top if available
+    if coverage_reasoning:
+        data_summary.append(f"Coverage Analysis: {coverage_reasoning}")
     
     if context_data["tool_data"]:
         data_summary.append(f"Tool Data: {len(context_data['tool_data'])} tools executed")

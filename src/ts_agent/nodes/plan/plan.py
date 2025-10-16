@@ -1,6 +1,7 @@
 """Plan node implementation for intelligent tool selection and planning."""
 
 import re
+import os
 from typing import Dict, Any, List
 from ts_agent.types import State, ToolType
 from .schemas import PlanData, Plan, PlanRequest
@@ -321,15 +322,7 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
         context_info=context_info,
         available_tools=formatted_tools
     )
-    
-    # Debug: Print full prompt being sent to LLM
-    if os.getenv("DEBUG_PLAN_CONTEXT") == "true":
-        print(f"\n{'='*80}")
-        print("🔍 DEBUG: FULL PROMPT Being Sent to Plan LLM")
-        print(f"{'='*80}")
-        print(prompt)
-        print(f"{'='*80}\n")
-    
+        
     # Get LLM response with structured output
     # Use function_calling method since Plan schema contains Dict[str, Any] 
     # which is not supported by OpenAI's native structured output

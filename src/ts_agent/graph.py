@@ -6,6 +6,7 @@ from ts_agent.nodes.initialize.initialize import initialize_node
 from ts_agent.nodes.plan.plan import plan_node
 from ts_agent.nodes.gather.gather import gather_node
 from ts_agent.nodes.coverage.coverage import coverage_node
+from ts_agent.nodes.action.action import action_node
 from ts_agent.nodes.draft.draft import draft_node
 from ts_agent.nodes.validate.validate import validate_node
 from ts_agent.nodes.escalate.escalate import escalate_node
@@ -22,6 +23,7 @@ def build_graph():
     g.add_node("plan", plan_node)
     g.add_node("gather", gather_node)
     g.add_node("coverage", coverage_node)
+    g.add_node("action", action_node)
     g.add_node("draft", draft_node)
     g.add_node("validate", validate_node)
     g.add_node("escalate", escalate_node)
@@ -56,6 +58,8 @@ def build_graph():
             return "plan"
         elif next_node == "respond":
             return "draft"  # Route to draft node for response generation
+        elif next_node == "action":
+            return "action"  # Route to action node for action tool execution
         elif next_node == "escalate":
             return "escalate"  # Route to escalate node
         else:
@@ -123,8 +127,30 @@ def build_graph():
         {
             "plan": "plan",
             "draft": "draft",
+            "action": "action",
             "escalate": "escalate",
             "end": END
+        }
+    )
+    
+    # Add conditional routing from action
+    def route_from_action(state: State) -> str:
+        """Route from action node back to coverage for re-evaluation."""
+        next_node = state.get("next_node", "coverage")
+        
+        if next_node == "coverage":
+            return "coverage"
+        elif next_node == "escalate":
+            return "escalate"
+        else:
+            return "coverage"  # Default to coverage
+    
+    g.add_conditional_edges(
+        "action",
+        route_from_action,
+        {
+            "coverage": "coverage",
+            "escalate": "escalate"
         }
     )
     
@@ -151,11 +177,17 @@ def build_graph():
     
     # Add conditional routing from response
     def route_from_response(state: State) -> str:
-        """Route from response node based on delivery success/failure."""
-        if state.get("error"):
-            return "escalate"  # If response delivery failed, escalate
+        """Route from response node based on delivery success/failure and next_node."""
+        next_node = state.get("next_node", "finalize")
+        
+        # Response node sets next_node to "escalate" when:
+        # - Response delivery failed, OR
+        # - Draft requested escalation (ROUTE_TO_TEAM), OR
+        # - Actions were taken (needs human review)
+        if next_node == "escalate":
+            return "escalate"
         else:
-            return "finalize"  # If successful, proceed to finalize
+            return "finalize"
     
     g.add_conditional_edges(
         "response",

@@ -1,7 +1,15 @@
 """Types and state definitions for the agent."""
 
+from enum import Enum
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from typing_extensions import TypedDict
+
+
+class ToolType(str, Enum):
+    """Types of tools available."""
+    GATHER = "gather"
+    INTERNAL_ACTION = "internal_action"
+    EXTERNAL_ACTION = "external_action"
 
 if TYPE_CHECKING:
     from ts_agent.nodes.plan.schemas import PlanData
@@ -56,6 +64,11 @@ class State(TypedDict, total=False):
     # Loop Management (Plan → Gather → Coverage)
     hops: List[HopData]  # Array of hop data
     max_hops: Optional[int]  # Maximum allowed hops (default: 2)
+    
+    # Action Management (separate from hops)
+    actions: Optional[List[Dict[str, Any]]]  # List of action executions with audit trail
+    max_actions: Optional[int]  # Maximum allowed actions per flow (default: 1)
+    actions_taken: Optional[int]  # Number of actions taken so far
     
     # Post-Loop Nodes (Draft, Validate, Escalate, Response)
     draft: Optional[Dict[str, Any]]  # Draft node data

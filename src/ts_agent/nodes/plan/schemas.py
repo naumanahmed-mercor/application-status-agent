@@ -18,7 +18,9 @@ class ToolCall(BaseModel):
 class PlanData(TypedDict, total=False):
     """Data structure for plan node (stored in hop)."""
     plan: Optional[Dict[str, Any]]
-    tool_calls: Optional[List[ToolCall]]
+    tool_calls: Optional[List[ToolCall]]  # All tool calls (for backward compatibility)
+    gather_tool_calls: Optional[List[ToolCall]]  # Only gather-type tools
+    action_tool_calls: Optional[List[ToolCall]]  # Only action-type tools
     reasoning: Optional[str]
 
 

@@ -5,7 +5,7 @@ Initialize node for setting up conversation data and available tools.
 import os
 import time
 from typing import Dict, Any
-from ts_agent.types import State
+from ts_agent.types import State, ToolType
 from src.clients.intercom import IntercomClient
 from src.mcp.factory import create_mcp_client
 from .schemas import InitializeData
@@ -94,12 +94,28 @@ def initialize_node(state: State) -> State:
             available_tools = mcp_client.list_tools()
             print(f"✅ Found {len(available_tools)} available tools")
             
+            # Assign tool types to each tool
+            # Currently, the MCP server doesn't return tool types yet, so we assign them manually
+            for tool in available_tools:
+                tool_name = tool.get("name", "")
+                if tool_name == "match_and_link_conversation_to_ticket":
+                    tool["tool_type"] = ToolType.INTERNAL_ACTION.value
+                else:
+                    tool["tool_type"] = ToolType.GATHER.value
+            
+            print(f"🏷️  Assigned tool types:")
+            for tool in available_tools:
+                print(f"   {tool.get('name')}: {tool.get('tool_type')}")
+            
             # Initialize state with proper values (NO MCP client in state)
             state["available_tools"] = available_tools
             state["tool_data"] = state.get("tool_data", {})
             state["docs_data"] = state.get("docs_data", {})
             state["hops"] = state.get("hops", [])
             state["max_hops"] = state.get("max_hops", 3)
+            state["actions"] = state.get("actions", [])
+            state["max_actions"] = state.get("max_actions", 1)
+            state["actions_taken"] = state.get("actions_taken", 0)
             state["response"] = state.get("response", "")
             state["error"] = state.get("error", None)
             state["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -47,8 +47,10 @@ def draft_node(state: Dict[str, Any]) -> Dict[str, Any]:
             # Get the most recent hop's coverage reasoning
             latest_hop = hops[-1]
             coverage_data = latest_hop.get("coverage", {})
-            if coverage_data and coverage_data.get("coverage_analysis"):
-                coverage_reasoning = coverage_data["coverage_analysis"].get("reasoning")
+            if coverage_data and coverage_data.get("coverage_response"):
+                coverage_response = coverage_data["coverage_response"]
+                # coverage_response is stored as a Pydantic model dict
+                coverage_reasoning = coverage_response.get("reasoning") if isinstance(coverage_response, dict) else None
         
         # Generate response using LLM
         response = _generate_response(

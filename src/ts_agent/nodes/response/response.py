@@ -85,19 +85,28 @@ def response_node(state: Dict[str, Any]) -> Dict[str, Any]:
     
     # Check if draft requested escalation after response (e.g., ROUTE_TO_TEAM)
     draft_data = state.get("draft", {})
-    should_escalate = draft_data.get("response_type") == "ROUTE_TO_TEAM"
+    should_escalate_from_draft = draft_data.get("response_type") == "ROUTE_TO_TEAM"
+    
+    # Check if any actions were taken (actions need human review)
+    actions_taken = state.get("actions_taken", 0)
+    should_escalate_from_actions = actions_taken > 0
     
     # Determine routing
     if "next_node" in state and state["next_node"] == "escalate":
         # Already set to escalate (e.g., from an error)
         pass
-    elif should_escalate and response_data.intercom_delivered:
-        # Successfully sent message, now escalate as planned (ROUTE_TO_TEAM)
-        state["next_node"] = "escalate"
-        print(f"🔀 Message sent successfully, now routing to escalate")
     elif not response_data.intercom_delivered:
         # Failed to send - escalate with error
         state["next_node"] = "escalate"
+    elif should_escalate_from_draft and response_data.intercom_delivered:
+        # Successfully sent message, now escalate as planned (ROUTE_TO_TEAM)
+        state["next_node"] = "escalate"
+        print(f"🔀 Message sent successfully, routing to escalate (draft requested)")
+    elif should_escalate_from_actions and response_data.intercom_delivered:
+        # Successfully sent message, escalate for action review
+        state["next_node"] = "escalate"
+        state["escalation_reason"] = f"Action tools were executed ({actions_taken} action(s)). Human review required."
+        print(f"🔀 Message sent successfully, routing to escalate (actions taken: {actions_taken})")
     else:
         # Normal flow - go to finalize
         state["next_node"] = "finalize"

@@ -208,25 +208,8 @@ def _analyze_coverage(
         Coverage analysis response
     """
     # Create detailed prompt for LLM with actual data content
-    # Get prompt - use local file in dev mode, LangSmith in production
-    use_local_prompt = os.getenv("USE_LOCAL_COVERAGE_PROMPT", "false").lower() == "true"
-    
-    if use_local_prompt:
-        # Load from local file for development
-        prompt_file_path = os.path.join(
-            os.path.dirname(__file__), 
-            "COVERAGE_PROMPT_LOCAL.md"
-        )
-        try:
-            with open(prompt_file_path, "r") as f:
-                prompt_template_text = f.read()
-            print("📝 Using local coverage prompt for development")
-        except FileNotFoundError:
-            print("⚠️  Local prompt file not found, falling back to LangSmith")
-            prompt_template_text = get_prompt(PROMPT_NAMES["COVERAGE_NODE"]).template
-    else:
-        # Use LangSmith prompt for production
-        prompt_template_text = get_prompt(PROMPT_NAMES["COVERAGE_NODE"]).template
+    # Get prompt from LangSmith
+    prompt_template_text = get_prompt(PROMPT_NAMES["COVERAGE_NODE"])
     
     # Format available data summary
     available_data_summary = _summarize_accumulated_data_with_content(

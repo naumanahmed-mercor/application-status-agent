@@ -206,7 +206,10 @@ def action_node(state: State) -> State:
 
 def _execute_action_tool(mcp_client, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Execute a single action tool using MCP client.
+    Execute a single action tool using MCP client with extended timeout.
+    
+    Action tools may take longer than gather tools due to external API calls,
+    so we use a 120-second timeout instead of the default 30 seconds.
     
     Args:
         mcp_client: MCP client instance
@@ -217,7 +220,8 @@ def _execute_action_tool(mcp_client, tool_name: str, parameters: Dict[str, Any])
         Action tool execution result data
     """
     try:
-        result = mcp_client.call_tool(tool_name, parameters)
+        # Use 120-second timeout for action tools (vs 30s default for gather tools)
+        result = mcp_client.call_tool(tool_name, parameters, timeout=120.0)
         return result
     except Exception as e:
         raise Exception(f"Action tool execution failed: {str(e)}")

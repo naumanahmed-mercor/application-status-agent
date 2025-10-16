@@ -60,7 +60,7 @@ def validate_node(state: Dict[str, Any]) -> Dict[str, Any]:
         response = requests.post(
             validation_endpoint,
             json=validation_payload,
-            timeout=120,
+            timeout=180,
             headers={
                 "Content-Type": "application/json",
                 "x-api-key": validation_api_key

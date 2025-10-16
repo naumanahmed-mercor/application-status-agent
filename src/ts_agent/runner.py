@@ -59,6 +59,10 @@ def run_agent_with_conversation_id(conversation_id: str) -> dict:
         # Loop management
         "hops": hops_array,
         "max_hops": final_state.get("max_hops", 3),
+        # Action management (state level)
+        "actions": final_state.get("actions", []),  # Action tool executions with audit trail
+        "max_actions": final_state.get("max_actions", 1),
+        "actions_taken": final_state.get("actions_taken", 0),
         # Node execution data (state level)
         "draft": final_state.get("draft"),
         "validate": final_state.get("validate"),

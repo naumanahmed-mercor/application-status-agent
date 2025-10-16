@@ -43,11 +43,11 @@ class MCPClient:
             headers={
                 "Authorization": f"Bearer {auth_token}",
                 "Content-Type": "application/json"
-            },
-            timeout=30.0
+            }
+            # No client-level timeout - each request sets its own timeout
         )
     
-    def _make_request(self, method: str, params: Optional[Dict[str, Any]] = None, request_id: str | int = 1) -> MCPResponse:
+    def _make_request(self, method: str, params: Optional[Dict[str, Any]] = None, request_id: str | int = 1, timeout: float = 30.0) -> MCPResponse:
         """
         Make a JSON-RPC request to the MCP server.
         
@@ -55,6 +55,7 @@ class MCPClient:
             method: JSON-RPC method name
             params: Method parameters
             request_id: Request identifier
+            timeout: Request timeout in seconds (defaults to 30s)
             
         Returns:
             MCPResponse object
@@ -71,7 +72,8 @@ class MCPClient:
         try:
             response = self.client.post(
                 "/webhook/talent-success/mcp",
-                json=request_data.model_dump()
+                json=request_data.model_dump(),
+                timeout=timeout
             )
             response.raise_for_status()
             
@@ -118,13 +120,14 @@ class MCPClient:
         response = self._make_request("tools/get", {"name": tool_name})
         return response.result.get("tool", {})
     
-    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def call_tool(self, tool_name: str, arguments: Dict[str, Any], timeout: float = 30.0) -> List[Dict[str, Any]]:
         """
         Call a tool with the given arguments.
         
         Args:
             tool_name: Name of the tool to call
             arguments: Tool arguments
+            timeout: Request timeout in seconds (defaults to 30s)
             
         Returns:
             Tool execution result
@@ -132,7 +135,7 @@ class MCPClient:
         response = self._make_request("tools/call", {
             "name": tool_name,
             "arguments": arguments
-        })
+        }, timeout=timeout)
         return response.result.get("content", [])
     
     def close(self):

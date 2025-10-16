@@ -87,9 +87,10 @@ def response_node(state: Dict[str, Any]) -> Dict[str, Any]:
     draft_data = state.get("draft", {})
     should_escalate_from_draft = draft_data.get("response_type") == "ROUTE_TO_TEAM"
     
-    # Check if any actions were taken (actions need human review)
-    actions_taken = state.get("actions_taken", 0)
-    should_escalate_from_actions = actions_taken > 0
+    # Check if any actions require human review
+    # Only escalate if actions made real changes (not just "no matches found")
+    actions = state.get("actions", [])
+    should_escalate_from_actions = any(action.get("requires_review", False) for action in actions)
     
     # Determine routing
     if "next_node" in state and state["next_node"] == "escalate":
@@ -104,9 +105,12 @@ def response_node(state: Dict[str, Any]) -> Dict[str, Any]:
         print(f"🔀 Message sent successfully, routing to escalate (draft requested)")
     elif should_escalate_from_actions and response_data.intercom_delivered:
         # Successfully sent message, escalate for action review
+        # Count actions that require review
+        actions_requiring_review = [a for a in actions if a.get("requires_review", False)]
+        action_names = ", ".join([a.get("tool_name", "unknown") for a in actions_requiring_review])
         state["next_node"] = "escalate"
-        state["escalation_reason"] = f"Action tools were executed ({actions_taken} action(s)). Human review required."
-        print(f"🔀 Message sent successfully, routing to escalate (actions taken: {actions_taken})")
+        state["escalation_reason"] = f"Action tools made changes requiring review: {action_names}. Human verification needed."
+        print(f"🔀 Message sent successfully, routing to escalate ({len(actions_requiring_review)} action(s) require review)")
     else:
         # Normal flow - go to finalize
         state["next_node"] = "finalize"

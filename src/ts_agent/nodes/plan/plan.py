@@ -310,24 +310,8 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
     conversation_history = request.context.get("conversation_history_formatted", "")
     user_details = request.context.get("user_details_formatted", "")
     
-    # Get prompt - use local file in dev mode, LangSmith in production
-    import os
-    use_local_prompt = os.getenv("USE_LOCAL_PLAN_PROMPT", "false").lower() == "true"
-    
-    if use_local_prompt:
-        # Load from local file for development
-        from pathlib import Path
-        local_prompt_path = Path(__file__).parent / "PLAN_PROMPT_LOCAL.md"
-        try:
-            with open(local_prompt_path, 'r') as f:
-                prompt_template_text = f.read()
-            print("📝 Using local plan prompt for development")
-        except FileNotFoundError:
-            print("⚠️  Local plan prompt file not found, falling back to LangSmith")
-            prompt_template_text = get_prompt(PROMPT_NAMES["PLAN_NODE"])
-    else:
-        # Use LangSmith prompt for production
-        prompt_template_text = get_prompt(PROMPT_NAMES["PLAN_NODE"])
+    # Get prompt from LangSmith
+    prompt_template_text = get_prompt(PROMPT_NAMES["PLAN_NODE"])
     
     # Format the prompt with variables
     formatted_tools = _format_tools_for_prompt(available_tools)

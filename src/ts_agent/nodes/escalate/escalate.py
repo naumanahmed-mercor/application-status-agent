@@ -94,6 +94,17 @@ def _determine_escalation_source(state: Dict[str, Any]) -> str:
     Returns:
         Source of escalation
     """
+    # Check if escalation is due to actions being taken
+    actions_taken = state.get("actions_taken", 0)
+    escalation_reason = state.get("escalation_reason", "")
+    if actions_taken > 0 and "action" in escalation_reason.lower():
+        return "action"
+    
+    # Check if draft requested escalation (ROUTE_TO_TEAM)
+    draft_data = state.get("draft", {})
+    if draft_data and draft_data.get("response_type") == "ROUTE_TO_TEAM":
+        return "draft"
+    
     # Check if validate node failed
     validate_data = state.get("validate", {})
     if validate_data and not validate_data.get("overall_passed", True):
@@ -108,7 +119,6 @@ def _determine_escalation_source(state: Dict[str, Any]) -> str:
             return "coverage"
 
     # Check if draft node failed
-    draft_data = state.get("draft", {})
     if draft_data and draft_data.get("error"):
         return "draft"
 

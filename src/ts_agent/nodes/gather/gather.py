@@ -24,12 +24,14 @@ def gather_node(state: State) -> State:
     
     current_hop_data = hops_array[current_hop_index]
     plan_data = current_hop_data.get("plan", {})
-    tool_calls_data = plan_data.get("tool_calls", [])
+    
+    # Get only gather tool calls (plan node already separated them)
+    gather_tool_calls = plan_data.get("gather_tool_calls", [])
     user_email = state.get("user_email")
     
-    if not tool_calls_data:
+    if not gather_tool_calls:
         # No tools needed - this is normal for simple queries like "Hi"
-        print("ℹ️  No tools needed for this query")
+        print("ℹ️  No gather tools needed for this query")
         
         # Store empty gather results using GatherData TypedDict
         gather_data: GatherData = {
@@ -53,9 +55,9 @@ def gather_node(state: State) -> State:
         failed_tools = []
         total_start_time = time.time()
         
-        print(f"🔧 Executing {len(tool_calls_data)} tool calls...")
+        print(f"🔧 Executing {len(gather_tool_calls)} gather tool calls...")
         
-        for i, tool_call_data in enumerate(tool_calls_data, 1):
+        for i, tool_call_data in enumerate(gather_tool_calls, 1):
             start_time = time.time()  # Move start_time outside try block
             tool_call = None  # Initialize tool_call variable
             try:
@@ -99,7 +101,7 @@ def gather_node(state: State) -> State:
                 print(f"      ❌ Failed: {e}")
         
         total_execution_time = (time.time() - total_start_time) * 1000
-        success_rate = len(successful_tools) / len(tool_calls_data) if tool_calls_data else 0
+        success_rate = len(successful_tools) / len(gather_tool_calls) if gather_tool_calls else 0
         
         # Store results in nested gather structure using GatherData TypedDict
         gather_data: GatherData = {

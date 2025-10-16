@@ -2,7 +2,7 @@
 
 import re
 from typing import Dict, Any, List
-from ts_agent.types import State
+from ts_agent.types import State, ToolType
 from .schemas import PlanData, Plan, PlanRequest
 from ts_agent.llm import planner_llm
 from src.clients.prompts import get_prompt, PROMPT_NAMES
@@ -16,10 +16,15 @@ logger = logging.getLogger(__name__)
 def _validate_and_sanitize_plan(
     plan: Plan, 
     available_tools: List[Dict[str, Any]], 
-    verified_email: str
+    verified_email: str,
+    conversation_id: str
 ) -> Plan:
     """
-    Validate tool calls against tool schemas and sanitize email fields.
+    Validate tool calls against tool schemas and sanitize parameters.
+    
+    Injects verified values from state:
+    - user_email: Replaces any email parameter with verified email from Intercom
+    - conversation_id: Injects conversation_id for action tools that need it
     
     Invalid tool calls are skipped with a warning instead of failing the entire plan.
     
@@ -27,6 +32,7 @@ def _validate_and_sanitize_plan(
         plan: Generated plan from LLM
         available_tools: List of available tools with schemas
         verified_email: Verified user email from Intercom (source of truth)
+        conversation_id: Conversation ID from state
         
     Returns:
         Validated and sanitized plan (with invalid tool calls removed)
@@ -54,12 +60,27 @@ def _validate_and_sanitize_plan(
         tool_schema = tools_map[tool_name]
         input_schema = tool_schema.get("inputSchema", {})
         
-        # 2. Inject/replace email fields with verified email (SECURITY)
-        sanitized_params = _sanitize_email_params(
-            tool_call.parameters, 
-            verified_email,
-            input_schema
-        )
+        # 2. Sanitize parameters (inject verified email, conversation_id, etc.)
+        # Build injection map with trusted values
+        import os
+        injection_map = {
+            "user_email": verified_email,
+            "conversation_id": conversation_id,
+            "dry_run": lambda: os.getenv("DRY_RUN", "false").lower() == "true",
+        }
+        
+        try:
+            sanitized_params = _sanitize_tool_params(
+                tool_call.parameters,
+                input_schema,
+                tool_name,
+                injection_map
+            )
+        except Exception as e:
+            logger.warning(f"   ⚠️  Skipping tool {tool_name}: Parameter sanitization failed: {e}")
+            print(f"   ⚠️  Skipping tool {tool_name}: {e}")
+            skipped_count += 1
+            continue
         
         # 3. Validate parameters against tool's input schema
         if input_schema and input_schema.get("properties"):
@@ -93,61 +114,60 @@ def _validate_and_sanitize_plan(
     )
 
 
-def _sanitize_email_params(
-    params: Dict[str, Any], 
-    verified_email: str,
-    input_schema: Dict[str, Any]
+def _sanitize_tool_params(
+    params: Dict[str, Any],
+    input_schema: Dict[str, Any],
+    tool_name: str,
+    injection_map: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Inject/replace email fields in parameters with verified email from Intercom.
+    Sanitize tool parameters by injecting verified values from state.
     
-    This is a CRITICAL SECURITY measure to prevent the LLM from:
-    1. Hallucinating email addresses
-    2. Using incorrect email addresses
-    3. Accessing data for the wrong user
-    
-    If the tool's schema requires an email field, we ALWAYS inject the verified email,
-    regardless of what the LLM generated.
+    This function:
+    1. Accepts a dict of trusted values to inject/replace
+    2. Goes through tool schema and replaces params that match the injection map
+    3. Validates all required params are present after injection
     
     Args:
-        params: Tool parameters (potentially containing email fields)
-        verified_email: Verified email from Intercom API (source of truth)
-        input_schema: Tool's input schema to check which email fields are expected
+        params: Original parameters from LLM
+        input_schema: Tool's input schema
+        tool_name: Name of the tool
+        injection_map: Dict mapping param names to trusted values (can be callables)
         
     Returns:
-        Sanitized parameters with verified email injected/replaced
+        Sanitized parameters with trusted values injected
+        
+    Raises:
+        ValueError: If required parameters are missing after injection
     """
     sanitized = params.copy()
+    properties = input_schema.get("properties", {})
+    required_params = input_schema.get("required", [])
     
-    # Get properties from schema to see which email fields this tool expects
-    schema_properties = input_schema.get("properties", {})
-    
-    # Common email field names to check/inject
-    email_field_candidates = ["user_email", "email", "userEmail", "Email"]
-    
-    # Find which email field(s) this tool actually uses
-    for field in email_field_candidates:
-        if field in schema_properties:
-            # This tool expects this email field
-            if field in sanitized:
-                # LLM provided an email - replace/verify it
-                original_value = sanitized[field]
-                if original_value != verified_email:
-                    # Emails don't match - REPLACE (security issue!)
-                    sanitized[field] = verified_email
-                    logger.warning(
-                        f"🔒 Security: REPLACED '{field}' "
-                        f"(LLM: '{original_value}') → verified: '{verified_email}'"
-                    )
-                else:
-                    # Emails match - verified successfully
-                    logger.debug(f"Security: Verified '{field}' = '{verified_email}'")
-            else:
-                # LLM didn't provide email - inject it
-                sanitized[field] = verified_email
-                logger.warning(
-                    f"🔒 Security: INJECTED '{field}' = '{verified_email}' (missing from LLM output)"
+    # Go through each parameter in the tool's schema
+    for param_name in properties.keys():
+        # Check if this param should be injected/replaced
+        if param_name in injection_map:
+            value = injection_map[param_name]
+            # Handle callable values (like dry_run)
+            sanitized[param_name] = value() if callable(value) else value
+            
+            if param_name not in params or params[param_name] != sanitized[param_name]:
+                logger.info(
+                    f"💉 Injected {param_name}={sanitized[param_name]} "
+                    f"(was: {params.get(param_name, 'missing')})"
                 )
+    
+    # Validate all required parameters are present
+    missing_params = []
+    for required_param in required_params:
+        if required_param not in sanitized or sanitized[required_param] is None:
+            missing_params.append(required_param)
+    
+    if missing_params:
+        raise ValueError(
+            f"Missing required parameters for {tool_name}: {', '.join(missing_params)}"
+        )
     
     return sanitized
 
@@ -205,23 +225,56 @@ def plan_node(state: State) -> State:
         user_details = state.get("user_details", {})
         verified_email = user_details.get("email", "")
         
-        # Validate and sanitize the plan (check tool schemas, replace email fields)
-        validated_plan = _validate_and_sanitize_plan(plan, available_tools, verified_email)
+        # Get conversation_id from state
+        conversation_id = state.get("conversation_id", "")
+        
+        # Validate and sanitize the plan (check tool schemas, inject verified parameters)
+        validated_plan = _validate_and_sanitize_plan(plan, available_tools, verified_email, conversation_id)
+        
+        # Separate tool calls by type (gather vs action)
+        gather_tool_calls = []
+        action_tool_calls = []
+        
+        # Create lookup for tool types
+        tools_type_map = {tool["name"]: tool.get("tool_type") for tool in available_tools}
+        
+        for tool_call in validated_plan.tool_calls:
+            tool_type = tools_type_map.get(tool_call.tool_name, ToolType.GATHER.value)
+            
+            if tool_type in [ToolType.INTERNAL_ACTION.value, ToolType.EXTERNAL_ACTION.value]:
+                action_tool_calls.append(tool_call)
+            else:
+                gather_tool_calls.append(tool_call)
         
         # Store plan in nested structure using PlanData TypedDict
         # Convert ToolCall objects to dictionaries for state storage
         tool_calls_dicts = [tc.model_dump() for tc in validated_plan.tool_calls]
+        gather_tool_calls_dicts = [tc.model_dump() for tc in gather_tool_calls]
+        action_tool_calls_dicts = [tc.model_dump() for tc in action_tool_calls]
         
         plan_data: PlanData = {
             "plan": validated_plan.model_dump(),
-            "tool_calls": tool_calls_dicts,
+            "tool_calls": tool_calls_dicts,  # All tools (backward compatibility)
+            "gather_tool_calls": gather_tool_calls_dicts,  # Only gather tools
+            "action_tool_calls": action_tool_calls_dicts,  # Only action tools
             "reasoning": validated_plan.reasoning,
         }
         hop_data["plan"] = plan_data
         
-        print(f"📋 Plan generated (Hop {current_hop + 1}): {len(validated_plan.tool_calls)} tools to execute")
-        for i, tool_call in enumerate(validated_plan.tool_calls, 1):
-            print(f"   {i}. {tool_call.tool_name} - {tool_call.reasoning}")
+        print(f"📋 Plan generated (Hop {current_hop + 1}):")
+        print(f"   📊 Total: {len(validated_plan.tool_calls)} tools")
+        print(f"   🔍 Gather tools: {len(gather_tool_calls)}")
+        print(f"   ⚡ Action tools: {len(action_tool_calls)}")
+        
+        if gather_tool_calls:
+            print(f"\n   Gather tools:")
+            for i, tool_call in enumerate(gather_tool_calls, 1):
+                print(f"      {i}. {tool_call.tool_name} - {tool_call.reasoning}")
+        
+        if action_tool_calls:
+            print(f"\n   Action tools (for coverage to consider):")
+            for i, tool_call in enumerate(action_tool_calls, 1):
+                print(f"      {i}. {tool_call.tool_name} - {tool_call.reasoning}")
         
     except Exception as e:
         error_msg = f"Plan generation failed: {str(e)}"
@@ -257,12 +310,28 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
     conversation_history = request.context.get("conversation_history_formatted", "")
     user_details = request.context.get("user_details_formatted", "")
     
-    # Get prompt from LangSmith
-    prompt_template = get_prompt(PROMPT_NAMES["PLAN_NODE"])
+    # Get prompt - use local file in dev mode, LangSmith in production
+    import os
+    use_local_prompt = os.getenv("USE_LOCAL_PLAN_PROMPT", "false").lower() == "true"
+    
+    if use_local_prompt:
+        # Load from local file for development
+        from pathlib import Path
+        local_prompt_path = Path(__file__).parent / "PLAN_PROMPT_LOCAL.md"
+        try:
+            with open(local_prompt_path, 'r') as f:
+                prompt_template_text = f.read()
+            print("📝 Using local plan prompt for development")
+        except FileNotFoundError:
+            print("⚠️  Local plan prompt file not found, falling back to LangSmith")
+            prompt_template_text = get_prompt(PROMPT_NAMES["PLAN_NODE"])
+    else:
+        # Use LangSmith prompt for production
+        prompt_template_text = get_prompt(PROMPT_NAMES["PLAN_NODE"])
     
     # Format the prompt with variables
     formatted_tools = _format_tools_for_prompt(available_tools)
-    prompt = prompt_template.format(
+    prompt = prompt_template_text.format(
         conversation_history=conversation_history,
         user_details=user_details,
         context_info=context_info,
@@ -270,7 +339,6 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
     )
     
     # Debug: Print full prompt being sent to LLM
-    import os
     if os.getenv("DEBUG_PLAN_CONTEXT") == "true":
         print(f"\n{'='*80}")
         print("🔍 DEBUG: FULL PROMPT Being Sent to Plan LLM")
@@ -297,9 +365,11 @@ def _format_tools_for_prompt(tools: List[Dict[str, Any]]) -> str:
         name = tool.get("name", "unknown")
         description = tool.get("description", "No description available")
         input_schema = tool.get("inputSchema", {})
+        tool_type = tool.get("tool_type", "gather")  # Get tool type
         
-        # Format tool with full schema
+        # Format tool with full schema and type
         tool_str = f"Tool: {name}\n"
+        tool_str += f"Type: {tool_type}\n"  # Add type to prompt
         tool_str += f"Description: {description}\n"
         tool_str += f"Input Schema:\n{json.dumps(input_schema, indent=2)}"
         
@@ -381,10 +451,9 @@ def _build_context_from_hops(hops_array: List[Dict[str, Any]], state: State) -> 
         
         # Get coverage data (will be overwritten by latest hop)
         coverage_data = hop.get("coverage", {})
-        if coverage_data:
+        if coverage_data and coverage_data.get("coverage_response"):
             # Always overwrite with latest hop's coverage analysis (only reasoning will be used)
-            if coverage_data.get("coverage_analysis"):
-                context["coverage_analysis"] = coverage_data["coverage_analysis"]
+            context["coverage_analysis"] = coverage_data["coverage_response"]
     
     return context
 

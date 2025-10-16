@@ -105,6 +105,10 @@ def action_node(state: State) -> State:
             audit_notes=audit_note
         )
         
+        # Determine if this action requires human review
+        # Actions require review if they made actual changes (not just "no matches found")
+        requires_review = _action_requires_review(action_tool_name, result_data)
+        
         # Store action data at state level (not in hop data)
         action_data: ActionData = {
             "tool_name": action_tool_name,
@@ -114,7 +118,8 @@ def action_node(state: State) -> State:
             "audit_notes": audit_note,
             "timestamp": timestamp,
             "success": True,
-            "error": None
+            "error": None,
+            "requires_review": requires_review
         }
         
         # Add hop number to track which hop triggered this action
@@ -162,6 +167,7 @@ def action_node(state: State) -> State:
         )
         
         # Create failed result at state level
+        # Failed actions always require review
         action_data: ActionData = {
             "tool_name": action_tool_name,
             "tool_result": None,
@@ -170,7 +176,8 @@ def action_node(state: State) -> State:
             "audit_notes": audit_note,
             "timestamp": timestamp,
             "success": False,
-            "error": error_msg
+            "error": error_msg,
+            "requires_review": True  # Failed actions always require review
         }
         
         # Add hop number to track which hop triggered this action
@@ -202,6 +209,47 @@ def action_node(state: State) -> State:
         print(f"🚨 Action failed - escalating immediately")
     
     return state
+
+
+def _action_requires_review(tool_name: str, result_data: Any) -> bool:
+    """
+    Determine if an action requires human review based on its result.
+    
+    Actions require review if they made actual changes, not if they just
+    returned "no matches" or similar.
+    
+    Args:
+        tool_name: Name of the action tool
+        result_data: Result data from the tool execution
+        
+    Returns:
+        True if the action requires human review, False otherwise
+    """
+    import json
+    
+    if tool_name == "match_and_link_conversation_to_ticket":
+        # Check if the tool actually matched/linked a ticket
+        # Result structure: [{"type": "text", "text": "{...JSON...}"}]
+        if isinstance(result_data, list) and len(result_data) > 0:
+            first_item = result_data[0]
+            if isinstance(first_item, dict):
+                text = first_item.get("text", "")
+                if isinstance(text, str):
+                    try:
+                        # Parse the JSON string
+                        parsed = json.loads(text)
+                        # Check the match_found field
+                        match_found = parsed.get("match_found", False)
+                        # Only require review if a match was found and linked
+                        return match_found
+                    except json.JSONDecodeError:
+                        # If we can't parse, default to requiring review for safety
+                        return True
+        # Default: require review for safety
+        return True
+    
+    # For other action tools, default to requiring review
+    return True
 
 
 def _execute_action_tool(mcp_client, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:

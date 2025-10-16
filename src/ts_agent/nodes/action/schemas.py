@@ -17,6 +17,7 @@ class ActionData(TypedDict, total=False):
     timestamp: Optional[str]
     success: Optional[bool]
     error: Optional[str]
+    requires_review: Optional[bool]  # Whether this action requires human review (e.g., actually made changes)
 
 
 class ActionToolCall(BaseModel):

@@ -1,5 +1,6 @@
 """Gather node implementation for executing tool calls."""
 
+import json
 import time
 from typing import Dict, Any, List
 from ts_agent.types import State
@@ -128,22 +129,17 @@ def gather_node(state: State) -> State:
                 # Check if this is a docs tool (search_talent_docs)
                 if result.tool_name == "search_talent_docs":
                     # Store docs data separately with unique key (query + hop)
-                    # Extract query from the result data structure
+                    # Extract query from the result data structure (now parsed from JSON-RPC)
                     query = "unknown_query"
-                    if result.data and len(result.data) > 0:
-                        first_item = result.data[0]
-                        if isinstance(first_item, dict) and "text" in first_item:
-                            text_data = first_item["text"]
-                            if isinstance(text_data, dict) and "query" in text_data:
-                                query = text_data["query"]
-                            elif isinstance(text_data, str):
-                                # Try to parse JSON string
-                                try:
-                                    import json
-                                    parsed = json.loads(text_data)
-                                    query = parsed.get("query", "unknown_query")
-                                except:
-                                    query = "unknown_query"
+                    if result.data:
+                        # After parsing, result.data is a dict with 'query' field
+                        if isinstance(result.data, dict):
+                            query = result.data.get("query", "unknown_query")
+                        # Fallback for old list format (shouldn't happen with parsing)
+                        elif isinstance(result.data, list) and len(result.data) > 0:
+                            first_item = result.data[0]
+                            if isinstance(first_item, dict):
+                                query = first_item.get("query", "unknown_query")
                     
                     # Create unique key with hop number to avoid overwriting
                     current_hop = len(state.get("hops", []))
@@ -221,7 +217,6 @@ def _parse_mcp_result(raw_result: Any) -> Any:
     Returns:
         Parsed data (original structure if not JSON-RPC format)
     """
-    import json
     
     # Handle list of results (e.g., [{"type": "text", "text": "..."}])
     if isinstance(raw_result, list) and len(raw_result) > 0:
@@ -244,6 +239,9 @@ def _parse_mcp_result(raw_result: Any) -> Any:
                 parsed_items.append(item)
         
         # If single item, unwrap the list
+        if len(parsed_items) == 0:
+            # Empty result - return empty list rather than failing
+            return []
         return parsed_items[0] if len(parsed_items) == 1 else parsed_items
     
     # Handle single result object {"type": "text", "text": "..."}
@@ -283,5 +281,10 @@ def _execute_tool(mcp_client, tool_call: ToolCall) -> Dict[str, Any]:
         # Parse JSON-RPC formatted result to extract actual data
         parsed_result = _parse_mcp_result(raw_result)
         return parsed_result
+    except json.JSONDecodeError as e:
+        raise Exception(f"Tool execution failed - JSON parse error: {str(e)}")
     except Exception as e:
-        raise Exception(f"Tool execution failed: {str(e)}")
+        # Log the actual error type and message for debugging
+        error_type = type(e).__name__
+        error_msg = str(e) if str(e) else repr(e)
+        raise Exception(f"Tool execution failed ({error_type}): {error_msg}")

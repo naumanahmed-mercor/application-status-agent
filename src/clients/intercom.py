@@ -258,10 +258,11 @@ class IntercomClient:
             body = part.get("body", "")  # Default to empty string if body is None
             part_type = part.get("part_type", "")
             
-            # Only include actual messages (comment), skip notes and system events
-            # Notes are internal and should not be part of the conversation
-            # Include messages even if body is empty (user can send empty messages)
-            if part_type == "comment":
+            # Only include actual messages (comment, open), skip notes and system events
+            # - "comment": Regular message replies
+            # - "open": Messages that reopen a closed conversation
+            # - Skip "note" (internal), "close" (system event), "assignment" (system event), etc.
+            if part_type in ["comment", "open"]:
                 # Determine role based on author type
                 author = part.get("author", {})
                 author_type = author.get("type", "user")

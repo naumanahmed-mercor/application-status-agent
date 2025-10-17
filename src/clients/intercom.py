@@ -263,6 +263,13 @@ class IntercomClient:
             # - "open": Messages that reopen a closed conversation
             # - Skip "note" (internal), "close" (system event), "assignment" (system event), etc.
             if part_type in ["comment", "open"]:
+                # Extract attachments if present
+                attachments = part.get("attachments", [])
+                
+                # Skip messages with no body and no attachments (e.g., empty "open" events)
+                if not body and not attachments:
+                    continue
+                
                 # Determine role based on author type
                 author = part.get("author", {})
                 author_type = author.get("type", "user")
@@ -270,9 +277,6 @@ class IntercomClient:
                 # Map Intercom author types to our agent roles
                 # Both "admin" and "bot" should be mapped to "assistant"
                 role = "assistant" if author_type in ["admin", "bot"] else "user"
-                
-                # Extract attachments if present
-                attachments = part.get("attachments", [])
                 
                 message = {
                     "role": role,

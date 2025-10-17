@@ -475,12 +475,21 @@ def _format_context_for_prompt(context: Dict[str, Any]) -> str:
             status = f"{result_count} results" if success else "FAILED"
             context_parts.append(f"  * '{query}' - {status}")
     
-    # Coverage analysis results (only reasoning from latest hop)
+    # Coverage analysis results (reasoning and missing data from latest hop)
     coverage_analysis = context.get("coverage_analysis")
     if coverage_analysis:
         reasoning = coverage_analysis.get('reasoning', '')
         if reasoning:
             context_parts.append(f"\n- Coverage analysis from previous hop: {reasoning}")
+        
+        # Include missing data gaps to guide tool selection
+        missing_data = coverage_analysis.get('missing_data', [])
+        if missing_data:
+            context_parts.append(f"\n- Missing data identified by coverage:")
+            for gap in missing_data:
+                gap_type = gap.get('gap_type', 'unknown')
+                description = gap.get('description', '')
+                context_parts.append(f"  * {gap_type}: {description}")
     
     # Available docs
     available_docs = context.get("available_docs", [])

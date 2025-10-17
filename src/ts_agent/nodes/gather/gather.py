@@ -69,6 +69,10 @@ def gather_node(state: State) -> State:
                 # Execute the tool
                 result_data = _execute_tool(mcp_client, tool_call)
                 
+                # Special case: Add instructions for get_user_referrals
+                if tool_call.tool_name == "get_user_referrals":
+                    result_data = _add_referral_instructions(result_data)
+                
                 execution_time = (time.time() - start_time) * 1000  # Convert to milliseconds
                 
                 # Create successful result
@@ -174,6 +178,91 @@ def gather_node(state: State) -> State:
     return state
 
 
+def _add_referral_instructions(result_data: Any) -> Any:
+    """
+    Add instructions to get_user_referrals response to guide coverage/plan nodes.
+    
+    Args:
+        result_data: Parsed result from get_user_referrals tool
+        
+    Returns:
+        Result data augmented with instructions field
+    """
+    instructions = (
+        "To fetch detailed application information for a specific referral, use the "
+        "'get_referee_applications' tool with the 'referral_id' parameter from the referrals list above. "
+        "This will return all job applications made by that referee, including referral bonus amounts "
+        "locked at application time and application statuses."
+    )
+    
+    # Since data is now parsed, it should be a dict
+    if isinstance(result_data, dict):
+        result_data["instructions"] = instructions
+    elif isinstance(result_data, list) and len(result_data) > 0:
+        # Handle list format (less common after parsing)
+        for item in result_data:
+            if isinstance(item, dict):
+                item["instructions"] = instructions
+                break  # Add to first dict only
+    
+    return result_data
+
+
+def _parse_mcp_result(raw_result: Any) -> Any:
+    """
+    Parse MCP JSON-RPC formatted result to extract actual data.
+    
+    MCP returns data in format: {"type": "text", "text": "<json_string>"}
+    This function extracts and parses the text field.
+    
+    Args:
+        raw_result: Raw result from MCP tool call
+        
+    Returns:
+        Parsed data (original structure if not JSON-RPC format)
+    """
+    import json
+    
+    # Handle list of results (e.g., [{"type": "text", "text": "..."}])
+    if isinstance(raw_result, list) and len(raw_result) > 0:
+        parsed_items = []
+        for item in raw_result:
+            if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+                text_content = item["text"]
+                # Try to parse the JSON string
+                try:
+                    if isinstance(text_content, str):
+                        parsed_items.append(json.loads(text_content))
+                    else:
+                        # Already parsed
+                        parsed_items.append(text_content)
+                except json.JSONDecodeError:
+                    # Not valid JSON, keep as string
+                    parsed_items.append(text_content)
+            else:
+                # Not JSON-RPC format, keep as is
+                parsed_items.append(item)
+        
+        # If single item, unwrap the list
+        return parsed_items[0] if len(parsed_items) == 1 else parsed_items
+    
+    # Handle single result object {"type": "text", "text": "..."}
+    elif isinstance(raw_result, dict) and raw_result.get("type") == "text" and "text" in raw_result:
+        text_content = raw_result["text"]
+        try:
+            if isinstance(text_content, str):
+                return json.loads(text_content)
+            else:
+                # Already parsed
+                return text_content
+        except json.JSONDecodeError:
+            # Not valid JSON, keep as string
+            return text_content
+    
+    # Not JSON-RPC format, return as is
+    return raw_result
+
+
 def _execute_tool(mcp_client, tool_call: ToolCall) -> Dict[str, Any]:
     """
     Execute a single tool call using MCP client.
@@ -183,14 +272,16 @@ def _execute_tool(mcp_client, tool_call: ToolCall) -> Dict[str, Any]:
         tool_call: Tool call to execute
         
     Returns:
-        Tool execution result data
+        Tool execution result data (parsed from JSON-RPC format)
     """
     tool_name = tool_call.tool_name
     parameters = tool_call.parameters
     
     # Execute tool using MCP client
     try:
-        result = mcp_client.call_tool(tool_name, parameters)
-        return result
+        raw_result = mcp_client.call_tool(tool_name, parameters)
+        # Parse JSON-RPC formatted result to extract actual data
+        parsed_result = _parse_mcp_result(raw_result)
+        return parsed_result
     except Exception as e:
         raise Exception(f"Tool execution failed: {str(e)}")

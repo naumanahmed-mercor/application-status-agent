@@ -120,6 +120,39 @@ def build_conversation_and_user_context(state: Dict[str, Any]) -> Dict[str, str]
     }
 
 
+def format_procedure_for_prompt(selected_procedure: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Format procedure for injection into LLM prompts.
+    
+    Returns empty string if no procedure, otherwise formats with context.
+    This function is used by both plan and coverage nodes.
+    
+    Args:
+        selected_procedure: Optional selected procedure dict from state
+        
+    Returns:
+        Formatted procedure text or empty string
+    """
+    if not selected_procedure:
+        return ""
+    
+    title = selected_procedure.get("title", "Untitled Procedure")
+    content = selected_procedure.get("content", "")
+    reasoning = selected_procedure.get("reasoning", "")
+    
+    procedure_text = "**INTERNAL PROCEDURE GUIDANCE:**\n"
+    procedure_text += f"An internal procedure has been identified that provides guidance for this scenario:\n\n"
+    procedure_text += f"Title: {title}\n\n"
+    
+    if reasoning:
+        procedure_text += f"Why this procedure was selected: {reasoning}\n\n"
+    
+    procedure_text += f"Procedure Details:\n{content}\n\n"
+    procedure_text += "**Consider this guidance when making decisions, but also use available tools as needed.**"
+    
+    return procedure_text
+
+
 def convert_messages_to_langchain_with_vision(
     messages: List[Dict[str, Any]], 
     subject: Optional[str] = None,

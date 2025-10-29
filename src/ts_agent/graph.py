@@ -3,6 +3,7 @@
 from langgraph.graph import StateGraph, START, END
 from ts_agent.types import State
 from ts_agent.nodes.initialize.initialize import initialize_node
+from ts_agent.nodes.procedure.procedure import procedure_node
 from ts_agent.nodes.plan.plan import plan_node
 from ts_agent.nodes.gather.gather import gather_node
 from ts_agent.nodes.coverage.coverage import coverage_node
@@ -20,6 +21,7 @@ def build_graph():
     
     # Add nodes
     g.add_node("initialize", initialize_node)
+    g.add_node("procedure", procedure_node)
     g.add_node("plan", plan_node)
     g.add_node("gather", gather_node)
     g.add_node("coverage", coverage_node)
@@ -71,7 +73,7 @@ def build_graph():
         if state.get("error"):
             return "escalate"  # If initialization failed, escalate
         else:
-            return "plan"  # If successful, proceed to plan
+            return "procedure"  # If successful, proceed to procedure
     
     # Add conditional routing from validate
     def route_from_validate(state: State) -> str:
@@ -98,10 +100,12 @@ def build_graph():
         "initialize",
         route_from_initialize,
         {
-            "plan": "plan",
+            "procedure": "procedure",
             "escalate": "escalate"
         }
     )
+    
+    g.add_edge("procedure", "plan")
     
     g.add_conditional_edges(
         "plan",

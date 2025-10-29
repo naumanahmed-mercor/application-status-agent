@@ -7,7 +7,7 @@ from ts_agent.types import State, ToolType
 from .schemas import PlanData, Plan, PlanRequest
 from ts_agent.llm import planner_llm
 from src.clients.prompts import get_prompt, PROMPT_NAMES
-from src.utils.prompts import build_conversation_and_user_context
+from src.utils.prompts import build_conversation_and_user_context, format_procedure_for_prompt
 from jsonschema import validate, ValidationError
 import logging
 
@@ -219,8 +219,11 @@ def plan_node(state: State) -> State:
         # Get available tools from state
         available_tools = state.get("available_tools", [])
         
+        # Get selected procedure from state (if any)
+        selected_procedure = state.get("selected_procedure")
+        
         # Generate plan using LLM
-        plan = _generate_plan(plan_request, available_tools)
+        plan = _generate_plan(plan_request, available_tools, selected_procedure)
         
         # Get verified email from Intercom (source of truth)
         user_details = state.get("user_details", {})
@@ -291,13 +294,14 @@ def plan_node(state: State) -> State:
     return state
 
 
-def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) -> Plan:
+def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]], selected_procedure: Dict[str, Any] = None) -> Plan:
     """
     Generate an execution plan using LLM.
     
     Args:
         request: Plan request with conversation history and context
         available_tools: List of available tools from MCP server
+        selected_procedure: Optional selected procedure from RAG store
         
     Returns:
         Generated execution plan
@@ -311,6 +315,9 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
     conversation_history = request.context.get("conversation_history_formatted", "")
     user_details = request.context.get("user_details_formatted", "")
     
+    # Format procedure if available
+    procedure_text = format_procedure_for_prompt(selected_procedure)
+    
     # Get prompt from LangSmith
     prompt_template_text = get_prompt(PROMPT_NAMES["PLAN_NODE"])
     
@@ -319,6 +326,7 @@ def _generate_plan(request: PlanRequest, available_tools: List[Dict[str, Any]]) 
     prompt = prompt_template_text.format(
         conversation_history=conversation_history,
         user_details=user_details,
+        procedure=procedure_text,
         context_info=context_info,
         available_tools=formatted_tools
     )

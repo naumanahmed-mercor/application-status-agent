@@ -57,6 +57,10 @@ class State(TypedDict, total=False):
     mcp_client: Optional[Any]  # MCP client instance
     available_tools: Optional[List[Dict[str, Any]]]  # Available tools from MCP server
     
+    # Procedure (Retrieved before plan-gather-coverage loop)
+    selected_procedure: Optional[Dict[str, Any]]  # Selected procedure from RAG store (if any)
+    procedure_node: Optional[Dict[str, Any]]  # Procedure node data (query, results, evaluation)
+    
     # Data Storage (Independent of hops)
     tool_data: Optional[Dict[str, Any]]  # Individual tool results by tool name
     docs_data: Optional[Dict[str, Any]]  # Individual docs results by query/topic

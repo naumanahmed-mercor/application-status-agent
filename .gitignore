@@ -70,3 +70,6 @@ tmp/
 
 # LangGraph
 .langgraph/
+
+talent-success-agent/scrape_traces/
+scrape_traces/

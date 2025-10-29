@@ -92,6 +92,10 @@ def initialize_node(state: State) -> State:
             # Fetch available tools from MCP server
             print("🔧 Fetching available tools from MCP server...")
             available_tools = mcp_client.list_tools()
+            
+            # Filter out search_procedures tool (handled by procedure node)
+            available_tools = [tool for tool in available_tools if tool.get("name") != "search_procedures"]
+            
             print(f"✅ Found {len(available_tools)} available tools")
             
             # Assign tool types to each tool

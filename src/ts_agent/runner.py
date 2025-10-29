@@ -53,6 +53,9 @@ def run_agent_with_conversation_id(conversation_id: str) -> dict:
         "conversation_id": conversation_id,
         "user_email": user_email,
         "messages": final_state.get("messages", []),
+        # Procedure data (retrieved before loop)
+        "selected_procedure": final_state.get("selected_procedure"),
+        "procedure_node": final_state.get("procedure_node"),
         # Data (independent of hops)
         "tool_data": tool_data,  # Individual tool results by tool name
         "docs_data": docs_data,  # Individual docs results by query/topic

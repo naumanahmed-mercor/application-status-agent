@@ -7,7 +7,7 @@ from ts_agent.types import State, ToolType
 from .schemas import CoverageData, CoverageResponse, DataGap
 from ts_agent.llm import planner_llm
 from src.clients.prompts import get_prompt, PROMPT_NAMES
-from src.utils.prompts import build_conversation_and_user_context
+from src.utils.prompts import build_conversation_and_user_context, format_procedure_for_prompt
 
 
 def coverage_node(state: State) -> State:
@@ -90,7 +90,8 @@ def coverage_node(state: State) -> State:
             planned_action_tools,  # Only what Plan suggested
             actions_taken,
             max_actions,
-            executed_actions  # Pass executed actions
+            executed_actions,  # Pass executed actions
+            state.get("selected_procedure")  # Pass selected procedure
         )
         
         # Print analysis results
@@ -186,7 +187,8 @@ def _analyze_coverage(
     planned_action_tools: Optional[List[Dict[str, Any]]] = None,
     actions_taken: int = 0,
     max_actions: int = 1,
-    executed_actions: Optional[List[Dict[str, Any]]] = None
+    executed_actions: Optional[List[Dict[str, Any]]] = None,
+    selected_procedure: Optional[Dict[str, Any]] = None
 ) -> CoverageResponse:
     """
     Analyze data coverage using LLM.
@@ -203,6 +205,7 @@ def _analyze_coverage(
         actions_taken: Number of actions taken so far
         max_actions: Maximum allowed actions
         executed_actions: List of actions that have already been executed
+        selected_procedure: Optional selected procedure from RAG store
         
     Returns:
         Coverage analysis response
@@ -224,10 +227,14 @@ def _analyze_coverage(
         max_hops  # Add max hops
     )
     
+    # Format procedure if available
+    procedure_text = format_procedure_for_prompt(selected_procedure)
+    
     # Format the prompt with variables
     prompt = prompt_template_text.format(
         conversation_history=conversation_history,
         user_details=user_details,
+        procedure=procedure_text,
         available_data=available_data_summary
     )
     

@@ -1,6 +1,7 @@
 """
 LangSmith prompts collection and client.
 All LLM prompts are stored in LangSmith and fetched at runtime.
+During development, prompts can be loaded from local txt files.
 """
 
 import os
@@ -14,10 +15,17 @@ class LangSmithPromptClient:
         """Initialize LangSmith client."""
         self.client = Client()
         self.project_name = os.getenv("LANGSMITH_PROJECT", "application-status-agent")
+        # Map prompt names to local file paths
+        self.local_prompt_files = {
+            "talent-success-agent-plan": "src/clients/plan_prompt.txt",
+            "talent-success-agent-coverage": "src/clients/coverage_prompt.txt",
+            "talent-success-agent-draft": "src/clients/draft_prompt.txt",
+            "melvin-procedure-matching-prompt": "src/clients/procedure_matching_prompt.txt"
+        }
         
     def get_prompt(self, prompt_name: str) -> str:
         """
-        Fetch a prompt from LangSmith by name.
+        Fetch a prompt by name. Tries local file first, then LangSmith.
         
         Args:
             prompt_name: Name of the prompt in LangSmith
@@ -26,8 +34,19 @@ class LangSmithPromptClient:
             Prompt template string
             
         Raises:
-            Exception: If prompt cannot be fetched from LangSmith
+            Exception: If prompt cannot be fetched from local or LangSmith
         """
+        # Try to load from local file first
+        local_file = self.local_prompt_files.get(prompt_name)
+        if local_file and os.path.exists(local_file):
+            try:
+                with open(local_file, 'r') as f:
+                    return f.read()
+            except Exception as e:
+                print(f"⚠️  Failed to load local prompt file {local_file}: {e}")
+                # Fall through to LangSmith
+        
+        # Fall back to LangSmith
         try:
             # Pull the prompt from LangSmith
             prompt = self.client.pull_prompt(prompt_name)
@@ -79,5 +98,6 @@ def get_prompt(prompt_name: str) -> str:
 PROMPT_NAMES = {
     "PLAN_NODE": "talent-success-agent-plan",
     "COVERAGE_NODE": "talent-success-agent-coverage", 
-    "DRAFT_NODE": "talent-success-agent-draft"
+    "DRAFT_NODE": "talent-success-agent-draft",
+    "PROCEDURE_MATCHING": "melvin-procedure-matching-prompt"
 }
